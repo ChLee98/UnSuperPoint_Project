@@ -565,7 +565,7 @@ def simple_train(config, output_dir, args):
                 print('Train Epoch: {} [{}/{} ]\t Loss: {:.6f}'.format(epoch, batch_idx * len(img0), len(trainloader.dataset),error))
                 
                 if whole_step % config['save_interval'] == 0:
-                    torch.save(model.state_dict(), os.path.join(save_path, config['model']['name'] + '_{}.pkl'.format(whole_step)))
+                    torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
                 
                 if whole_step % config['validation_interval'] == 0:
                     # TODO: Validation code should be implemented
@@ -573,11 +573,11 @@ def simple_train(config, output_dir, args):
 
                 error = 0
 
-        torch.save(model.state_dict(), os.path.join(save_path, config['model']['name'] + '_{}.pkl'.format(whole_step)))
+        torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
 
     except KeyboardInterrupt:
         print ("press ctrl + c, save model!")
-        torch.save(model.state_dict(), os.path.join(save_path, config['model']['name'] + '_{}.pkl'.format(whole_step)))
+        torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
         pass
 
 def simple_test(config, output_dir, args):
