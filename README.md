@@ -1,5 +1,10 @@
 # UnSuperPoint
 ## Conducted as a part of URP @ KAIST
+## How to train
+```
+python UnSuperPoint_Demo.py config/train.yaml unsuperpoint
+```
+
 ## TODO
  - [ ] Tensorboard writer should be used for easy debug
  - [ ] All code does not consider batch_size larger than 1
