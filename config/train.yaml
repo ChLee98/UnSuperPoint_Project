@@ -1,0 +1,39 @@
+data:
+  dataset: 'Coco'
+  root: '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/COCO'
+
+training:
+  learning_rate: 0.0001
+
+  epoch_train: 10
+  workers_train: 4
+  batch_size_train: 5
+
+  workers_val: 2
+  batch_size_val: 5
+
+model:
+  name: 'UnsuperPoint_single'
+  
+  correspondence_threshold: 4
+  
+  usp_loss:
+    alpha_usp: 1
+    alpha_position: 1
+    alpha_score: 2
+  
+  unixy_loss:
+    alpha_unixy: 100
+  
+  desc_loss:
+    alpha_desc: 0.001
+    lambda_d: 250
+    margin_positive: 1
+    margin_negative: 0.2
+
+  decorr_loss:
+    alpha_decorr: 0.03
+
+validation_interval: 100
+tensorboard_interval: 500
+save_interval: 500

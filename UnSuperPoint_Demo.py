@@ -15,6 +15,8 @@ import torch.optim as optim
 import yaml
 import argparse
 
+from settings import EXPORT_PATH, COCO_TRAIN, COCO_VAL
+
 class config():
     perspective = 0.1
     IMAGE_SHAPE = (320,240)
@@ -193,8 +195,19 @@ def get_dst_point():
     return dst_point
 
 class UnSuperPoint(nn.Module):
-    def __init__(self):
+    def __init__(self, config):
         super(UnSuperPoint, self).__init__()
+        self.usp = config['model']['usp_loss']['alpha_usp']
+        self.position_weight = config['model']['usp_loss']['alpha_position']
+        self.score_weight = config['model']['usp_loss']['alpha_score']
+        self.uni_xy = config['model']['unixy_loss']['alpha_unixy']
+        self.desc = config['model']['desc_loss']['alpha_desc']
+        self.d = config['model']['desc_loss']['lambda_d']
+        self.m_p = config['model']['desc_loss']['margin_positive']
+        self.m_n = config['model']['desc_loss']['margin_negative']
+        self.decorr = config['model']['decorr_loss']['alpha_decorr']
+        self.correspond = config['model']['correspondence_threshold']
+
         self.downsample = 8
         self.dev = torch.device("cuda") if torch.cuda.is_available() else torch.device('cpu')
         self.cnn = nn.Sequential(
@@ -289,10 +302,6 @@ class UnSuperPoint(nn.Module):
         return loss / bath
 
     def UnSuperPointLoss(self, As, Ap, Ad, Bs, Bp, Bd, mat):
-        self.usp = 1.0
-        self.uni_xy = 100
-        self.desc = 0.001
-        self.decorr = 0.03
         position_A = self.get_position(Ap, flag='A', mat=mat)
         position_B = self.get_position(Bp, flag='B', mat=None)
         # position_A = self.get_batch_position(Ap, flag='A', mat=mat)
@@ -308,8 +317,6 @@ class UnSuperPoint(nn.Module):
             self.desc * Descloss + self.decorr *Decorrloss)
 
     def usploss(self, As, Bs, mat, G):
-        self.position_weight = 1.0
-        self.score_weight = 2.0       
         reshape_As_k, reshape_Bs_k, d_k = self.get_point_pair(
             G, As, Bs)
         # print(d_k)
@@ -382,7 +389,6 @@ class UnSuperPoint(nn.Module):
         return G
 
     def get_point_pair(self, G, As, Bs):
-        self.correspond = 4
         A2B_min_Id = torch.argmin(G,dim=1)
         M = len(A2B_min_Id)
         Id = G[list(range(M)),A2B_min_Id] <= self.correspond
@@ -412,9 +418,6 @@ class UnSuperPoint(nn.Module):
         return torch.mean(torch.pow(position - i / (M-1),2))
 
     def descloss(self, DA, DB, G):
-        self.d = 250
-        self.m_p = 1
-        self.m_n = 0.2
         c, h, w = DA.shape
         C = G <= 8
         C_ = G > 8
@@ -540,18 +543,7 @@ class UnSuperPoint(nn.Module):
         print(A2B_Id.shape)
 
         finish_Id = A2B_Id == match_B2A
-        # print(torch.argmax(finish_Id.int()),'_______________')       
-#        s_th = 0.0
-#        A_S = reshape_As > s_th
-#        B_S = reshape_Bs > s_th
-#        S_id = A_S * B_S 
-#        
-#        desc_th = 0.0
-#        desc_id = D[list(range(len(D))),A2B_nearest_Id] > desc_th
-#        
-#        
-#        finish_Id *= (S_id * desc_id)
-        # print(torch.sum(finish_Id))       
+      
         points1 = reshape_Ap[finish_Id]
         points2 = reshape_Bp[A2B_nearest_Id[finish_Id]]
 
@@ -559,22 +551,39 @@ class UnSuperPoint(nn.Module):
 
         # Id = torch.zeros_like(A2B_nearest, dtype=torch.uint8)
         # for i in range(len(A2B_nearest)):
-def simple_train():
-    batch_size = 10
-    epochs = 1
-    learning_rate = 0.0001
-    dataset = Picture('/home/sinjeong/gitpjt/pytorch-superpoint/datasets/COCO/train2014',transform)
-    trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=4, 
-                         shuffle=True, drop_last=True)
+
+def simple_train(config, output_dir, args):
+    batch_size = config['training']['batch_size_train']
+    epochs = config['training']['epoch_train']
+    learning_rate = config['training']['learning_rate']
+    datapath = os.path.join(confing['data']['root'], COCO_TRAIN)
+    savepath = os.path.join(output_dir, 'checkpoints')
+    os.makedirs(save_path, exist_ok=True)
+
+    with open(os.path.join(output_dir, 'config.yml'), 'w') as f:
+        yaml.dump(config, f, default_flow_style=False)
+
+    # Prepare for data loader
+    dataset = Picture(datapath, transform)
+    trainloader = DataLoader(dataset, batch_size=batch_size,
+                        num_workers=config['training']['workers_train'],
+                        shuffle=True, drop_last=True)
+
+    # Prepare for model
     model = UnSuperPoint()
     model.train()
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device('cpu')
     model.to(dev)
-    optimizer = optim.SGD(model.parameters(),lr=learning_rate, momentum=0.9)
+
+    # Do optimization
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
+    whole_step = 0
     try:
         for epoch in range(1,epochs+1):
             error = 0
             for batch_idx, (img0, img1, mat) in enumerate(trainloader):
+                whole_step += 1
+
                 # print(img0.shape,img1.shape)
                 img0 = img0.to(dev)
                 img1 = img1.to(dev)
@@ -593,64 +602,62 @@ def simple_train():
                 loss.backward()
                 optimizer.step()
                 error += loss.item()
-                # if batch_idx % 10 == 9:
+
                 print('Train Epoch: {} [{}/{} ]\t Loss: {:.6f}'.format(epoch, batch_idx * len(img0), len(trainloader.dataset),error))
+                
+                if whole_step % config['save_interval'] == 0:
+                    torch.save(model.state_dict(), os.path.join(save_path, config['model']['name'] + '_{}.pkl'.format(whole_step)))
+                
+                if whole_step % config['validation_interval'] == 0:
+                    # TODO: Validation code should be implemented
+                    pass
+
                 error = 0
-        torch.save(model.state_dict(),'/home/sinjeong/unsuperpoint_allre9.pkl')
+
+        torch.save(model.state_dict(), os.path.join(save_path, config['model']['name'] + '_{}.pkl'.format(whole_step)))
+
     except KeyboardInterrupt:
         print ("press ctrl + c, save model!")
-        torch.save(model.state_dict(),'/home/sinjeong/unsuperpoint_allre9.pkl')
+        torch.save(model.state_dict(), os.path.join(save_path, config['model']['name'] + '_{}.pkl'.format(whole_step)))
         pass
+
+def simple_test(config, output_dir, args):
+    model = UnSuperPoint()
+    model.load_state_dict(torch.load('/home/sinjeong/unsuperpoint_allre9.pkl'))
+    model.to(model.dev)
+    model.train(False)
+    with torch.no_grad():
+        srcpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/1.ppm'
+        transformpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/4.ppm'
+        model.predict(srcpath, transformpath)
 
 if __name__ == '__main__':
     # add parser
     parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest='command')
 
     # Training command
-    parser.add_argument('--train', action='store_true', default=False, help='Do training')
+    p_train = subparsers.add_parser('train')
+    p_train.add_argument('config', type=str)
+    p_train.add_argument('export_name', type=str)
+    p_train.add_argument('--eval', action='store_true')
+    p_train.add_argument('--debug', action='store_true', default=False,
+                         help='turn on debuging mode')
+    p_train.set_defaults(func=simple_train)
 
+    # Testing command
+    p_test = subparsers.add_parser('test')
+    p_test.add_argument('config', type=str)
+    p_test.add_argument('export_name', type=str)
+    p_test.set_defaults(func=simple_test)
+    
     args = parser.parse_args()
 
-    if args.train:
-        simple_train()
+    output_dir = os.path.join(EXPORT_PATH, args.export_name)
+    os.makedirs(output_dir, exist_ok=True)
 
-    else:
-        model = UnSuperPoint()
-        model.load_state_dict(torch.load('/home/sinjeong/unsuperpoint_allre9.pkl'))
-        model.to(model.dev)
-        model.train(False)
-        with torch.no_grad():
-            srcpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/1.ppm'
-            transformpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/4.ppm'
-            model.predict(srcpath, transformpath)
+    with open(args.config, 'r') as f:
+        config = yaml.load(f)
 
-            # transformimg = cv2.imread(transformpath)
-            # transformimg_copy = Image.fromarray(cv2.cvtColor(transformimg,cv2.COLOR_BGR2RGB))
-            # transformimg_copy = transform_test(transformimg_copy)
-
-            # transformimg_copy = torch.unsqueeze(transformimg_copy,0)
-            # transformimg_copy = transformimg_copy.to(modul.dev)
-            # _,Ap,Ad = modul.forward(transformimg_copy)
-            # map = modul.get_position(Ap[0])
-            # map = map.reshape((2,-1)).permute(1,0)
-            # print(map)
-            # map = map.cpu().numpy()
-            # map = np.round(map)
-
-
-            # point_size = 1
-            # point_color = (0, 0, 255) # BGR
-            # thickness = 4 # 可以为 0 、4、8
-            # print(len(map))
-
-            # # 要画的点的坐标
-            # points_list = [(int(map[i,0]),int(map[i,1])) for i in range(len(map))]
-            # print(points_list)
-            # for point in points_list:
-            #     cv2.circle(transformimg , point, point_size, point_color, thickness)
-            # cv2.imwrite('可视化_.jpg',transformimg)
-        
-
-
-
-
+    args.func(config, output_dir, args)
+    
