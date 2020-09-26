@@ -17,12 +17,6 @@ import argparse
 
 from settings import EXPORT_PATH, COCO_TRAIN, COCO_VAL
 
-class config():
-    perspective = 0.1
-    IMAGE_SHAPE = (320,240)
-    scale = 0.3
-    rot = 30
-
 transform = T.Compose([
         T.ColorJitter(brightness=0.2, contrast=0.2, hue=0.2),
         T.ToTensor(),
@@ -35,10 +29,12 @@ transform_test = T.Compose([
         ])
 
 class Picture(Dataset):
-    def __init__(self,root,transforms=None,train=True):
+    def __init__(self, config, transforms=None, train=True):
         self.train = train
+        self.config = config
+        root = os.path.join(config['data']['root'], COCO_TRAIN)
         images = os.listdir(root)
-        self.images = [os.path.join(root,image) for image in images if image.endswith('.jpg')]
+        self.images = [os.path.join(root, image) for image in images if image.endswith('.jpg')]
         self.transforms = transforms        
     def __getitem__(self,index):
         image_path = self.images[index]
@@ -46,12 +42,12 @@ class Picture(Dataset):
         cv_image = cv2.imread(image_path)
         # print(cv_image.shape,image_path)
         # cv_image = Image.fromarray(cv2.cvtColor(cv_image,cv2.COLOR_BGR2RGB))
-        re_img = Myresize(cv_image)
-        # re_img = cv2.resize(cv_image,(config.IMAGE_SHAPE[1],
-        #     config.IMAGE_SHAPE[0]))
+        re_img = self.Myresize(cv_image)
+        # re_img = cv2.resize(cv_image,(config['data']['resize'][1],
+        #     config['data']['resize'][0]))
         # re_img = transform_handle(cv_image)
         # re_img = cv2.cvtColor(np.asarray(re_img),cv2.COLOR_RGB2BGR)
-        tran_img, tran_mat = EnhanceData(re_img)
+        tran_img, tran_mat = self.EnhanceData(re_img)
 
         # cv2.imwrite('re_+' + str(index) +'.jpg',re_img)
         # cv2.imwrite('tran_'+ str(index) +'.jpg',tran_img)
@@ -75,124 +71,88 @@ class Picture(Dataset):
     def __len__(self):
         return len(self.images)
 
-def Myresize(img):
-    # print(img.shape)
-    h,w = img.shape[:2]
-    if h < config.IMAGE_SHAPE[0] or w < config.IMAGE_SHAPE[1]:
-        new_h = config.IMAGE_SHAPE[0]
-        new_w = config.IMAGE_SHAPE[1]
-        h = new_h
-        w = new_w
-        img = cv2.resize(img,(new_w, new_h))
-        
-    new_h, new_w = config.IMAGE_SHAPE
-    try:
-        top = np.random.randint(0, h - new_h + 1)
-        left = np.random.randint(0, w - new_w + 1)
-    except:
-        print(h,new_h,w,new_w)
-        raise 
-    img = img[top: top + new_h,
-                          left: left + new_w]
-    return img
+    def Myresize(self, img):
+        # print(img.shape)
+        h,w = img.shape[:2]
+        if h < self.config['data']['resize'][0] or w < self.config['data']['resize'][1]:
+            new_h = self.config['data']['resize'][0]
+            new_w = self.config['data']['resize'][1]
+            h = new_h
+            w = new_w
+            img = cv2.resize(img,(new_w, new_h))
+            
+        new_h, new_w = self.config['data']['resize']
+        try:
+            top = np.random.randint(0, h - new_h + 1)
+            left = np.random.randint(0, w - new_w + 1)
+        except:
+            print(h,new_h,w,new_w)
+            raise 
+        img = img[top: top + new_h,
+                            left: left + new_w]
+        return img
 
-# def sp_noise(image,prob=0.2):
-#     '''
-#     添加椒盐噪声
-#     prob:噪声比例 
-#     '''
-#     output = np.zeros(image.shape,np.uint8)
-#     thres = 1 - prob 
-#     for i in range(image.shape[0]):
-#         for j in range(image.shape[1]):
-#             rdn = random.random()
-#             if rdn < prob:
-#                 output[i][j] = 0
-#             elif rdn > thres:
-#                 output[i][j] = 255
-#             else:
-#                 output[i][j] = image[i][j]
-#     return output
+    def EnhanceData(self, img):
+        seed = random.randint(1,20)
+        src_point =np.array( [(0,0),
+            (self.config['data']['resize'][1]-1, 0),
+            (0, self.config['data']['resize'][0]-1),
+            (self.config['data']['resize'][1]-1, self.config['data']['resize'][0]-1)],
+            dtype = 'float32')
 
-def gasuss_noise(image, mean=0, var=0.001):
-    ''' 
-        gaussian noise
-        mean
-        var : variance
-    '''
-    image = np.array(image/255, dtype=float)
-    noise = np.random.normal(mean, var ** 0.5, image.shape)
-    out = image + noise
-    if out.min() < 0:
-        low_clip = -1.
-    else:
-        low_clip = 0.
-    out = np.clip(out, low_clip, 1.0)
-    out = np.uint8(out*255)
-    #cv.imshow("gasuss", out)
-    return out
+        dst_point = self.get_dst_point()
+        center = (self.config['data']['resize'][1]/2, self.config['data']['resize'][0]/2)
+        rot = random.randint(-2,2) * config['data']['rot'] + random.randint(0,15)
+        scale = 1.2 - self.config['data']['scale']*random.random()
+        RS_mat = cv2.getRotationMatrix2D(center, rot, scale)
+        f_point = np.matmul(dst_point, RS_mat.T).astype('float32')
+        mat = cv2.getPerspectiveTransform(src_point, f_point)
+        out_img = cv2.warpPerspective(img, mat,(self.config['data']['resize'][1],self.config['data']['resize'][0]))
+        if seed > 10 and seed <= 15:
+            out_img = cv2.GaussianBlur(out_img, (3, 3), sigmaX=0)
+        return out_img,mat
 
-def EnhanceData(img):
-    seed = random.randint(1,20)
-    src_point =np.array( [(0,0),
-         (config.IMAGE_SHAPE[1]-1, 0),
-         (0, config.IMAGE_SHAPE[0]-1),
-         (config.IMAGE_SHAPE[1]-1, config.IMAGE_SHAPE[0]-1)
-                ], dtype = 'float32')
+    def get_dst_point(self):
+        a = random.random()
+        b = random.random()
+        c = random.random()
+        d = random.random()
+        e = random.random()
+        f = random.random()
 
-    dst_point = get_dst_point()
-    center = (config.IMAGE_SHAPE[1]/2, config.IMAGE_SHAPE[0]/2)
-    rot = random.randint(-2,2)*config.rot + random.randint(0,15)
-    scale = 1.2 - config.scale*random.random()
-    RS_mat = cv2.getRotationMatrix2D(center, rot, scale)
-    f_point = np.matmul(dst_point, RS_mat.T).astype('float32')
-    mat = cv2.getPerspectiveTransform(src_point, f_point)
-    out_img = cv2.warpPerspective(img, mat,(config.IMAGE_SHAPE[1],config.IMAGE_SHAPE[0]))
-    if seed > 10 and seed <= 15:
-        out_img = cv2.GaussianBlur(out_img, (3, 3),sigmaX=0)
-    return out_img,mat
+        if random.random() > 0.5:
+            left_top_x = config['data']['perspective']*a
+            left_top_y = config['data']['perspective']*b
+            right_top_x = 0.9 + config['data']['perspective']*c
+            right_top_y = config['data']['perspective']*d
+            left_bottom_x  = config['data']['perspective']*a
+            left_bottom_y  = 0.9 + config['data']['perspective']*e
+            right_bottom_x = 0.9 + config['data']['perspective']*c
+            right_bottom_y = 0.9 + config['data']['perspective']*f
+        else:
+            left_top_x = config['data']['perspective']*a
+            left_top_y = config['data']['perspective']*b
+            right_top_x = 0.9+config['data']['perspective']*c
+            right_top_y = config['data']['perspective']*d
+            left_bottom_x  = config['data']['perspective']*e
+            left_bottom_y  = 0.9 + config['data']['perspective']*b
+            right_bottom_x = 0.9 + config['data']['perspective']*f
+            right_bottom_y = 0.9 + config['data']['perspective']*d
 
-def get_dst_point():
-    a = random.random()
-    b = random.random()
-    c = random.random()
-    d = random.random()
-    e = random.random()
-    f = random.random()
+        # left_top_x = config['data']['perspective']*random.random()
+        # left_top_y = config['data']['perspective']*random.random()
+        # right_top_x = 0.9+config['data']['perspective']*random.random()
+        # right_top_y = config['data']['perspective']*random.random()
+        # left_bottom_x  = config['data']['perspective']*random.random()
+        # left_bottom_y  = 0.9 + config['data']['perspective']*random.random()
+        # right_bottom_x = 0.9 + config['data']['perspective']*random.random()
+        # right_bottom_y = 0.9 + config['data']['perspective']*random.random()
 
-    if random.random() > 0.5:
-        left_top_x = config.perspective*a
-        left_top_y = config.perspective*b
-        right_top_x = 0.9 + config.perspective*c
-        right_top_y = config.perspective*d
-        left_bottom_x  = config.perspective*a
-        left_bottom_y  = 0.9 + config.perspective*e
-        right_bottom_x = 0.9 + config.perspective*c
-        right_bottom_y = 0.9 + config.perspective*f
-    else:
-        left_top_x = config.perspective*a
-        left_top_y = config.perspective*b
-        right_top_x = 0.9+config.perspective*c
-        right_top_y = config.perspective*d
-        left_bottom_x  = config.perspective*e
-        left_bottom_y  = 0.9 + config.perspective*b
-        right_bottom_x = 0.9 + config.perspective*f
-        right_bottom_y = 0.9 + config.perspective*d
-
-    # left_top_x = config.perspective*random.random()
-    # left_top_y = config.perspective*random.random()
-    # right_top_x = 0.9+config.perspective*random.random()
-    # right_top_y = config.perspective*random.random()
-    # left_bottom_x  = config.perspective*random.random()
-    # left_bottom_y  = 0.9 + config.perspective*random.random()
-    # right_bottom_x = 0.9 + config.perspective*random.random()
-    # right_bottom_y = 0.9 + config.perspective*random.random()
-
-    dst_point = np.array([(config.IMAGE_SHAPE[1]*left_top_x,config.IMAGE_SHAPE[0]*left_top_y,1),
-            (config.IMAGE_SHAPE[1]*right_top_x, config.IMAGE_SHAPE[0]*right_top_y,1),
-            (config.IMAGE_SHAPE[1]*left_bottom_x,config.IMAGE_SHAPE[0]*left_bottom_y,1),
-            (config.IMAGE_SHAPE[1]*right_bottom_x,config.IMAGE_SHAPE[0]*right_bottom_y,1)],dtype = 'float32')
-    return dst_point
+        dst_point = np.array([(config['data']['resize'][1]*left_top_x,config['data']['resize'][0]*left_top_y,1),
+                (config['data']['resize'][1]*right_top_x, config['data']['resize'][0]*right_top_y,1),
+                (config['data']['resize'][1]*left_bottom_x,config['data']['resize'][0]*left_bottom_y,1),
+                (config['data']['resize'][1]*right_bottom_x,config['data']['resize'][0]*right_bottom_y,1)],dtype = 'float32')
+        return dst_point
 
 class UnSuperPoint(nn.Module):
     def __init__(self, config):
@@ -556,7 +516,6 @@ def simple_train(config, output_dir, args):
     batch_size = config['training']['batch_size_train']
     epochs = config['training']['epoch_train']
     learning_rate = config['training']['learning_rate']
-    datapath = os.path.join(config['data']['root'], COCO_TRAIN)
     savepath = os.path.join(output_dir, 'checkpoints')
     os.makedirs(savepath, exist_ok=True)
 
@@ -564,7 +523,7 @@ def simple_train(config, output_dir, args):
         yaml.dump(config, f, default_flow_style=False)
 
     # Prepare for data loader
-    dataset = Picture(datapath, transform)
+    dataset = Picture(config, transform)
     trainloader = DataLoader(dataset, batch_size=batch_size,
                         num_workers=config['training']['workers_train'],
                         shuffle=True, drop_last=True)
