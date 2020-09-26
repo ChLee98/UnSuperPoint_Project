@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as T 
 import torch.optim as optim
 
+import yaml
+import argparse
 
 class config():
     perspective = 0.1
@@ -64,7 +66,7 @@ class Picture(Dataset):
         #     source_img = torch.from_numpy(image_array1)
         #     des_img = torch.from_numpy(image_array2)
         # if self.train:
-        return source_img,des_img,tran_mat
+        return source_img, des_img, tran_mat
         # else:
             # return source_img,des_img,tran_mat
             
@@ -92,7 +94,6 @@ def Myresize(img):
                           left: left + new_w]
     return img
 
-
 # def sp_noise(image,prob=0.2):
 #     '''
 #     添加椒盐噪声
@@ -113,9 +114,9 @@ def Myresize(img):
 
 def gasuss_noise(image, mean=0, var=0.001):
     ''' 
-        添加高斯噪声
-        mean : 均值 
-        var : 方差
+        gaussian noise
+        mean
+        var : variance
     '''
     image = np.array(image/255, dtype=float)
     noise = np.random.normal(mean, var ** 0.5, image.shape)
@@ -160,7 +161,7 @@ def get_dst_point():
     if random.random() > 0.5:
         left_top_x = config.perspective*a
         left_top_y = config.perspective*b
-        right_top_x = 0.9+config.perspective*c
+        right_top_x = 0.9 + config.perspective*c
         right_top_y = config.perspective*d
         left_bottom_x  = config.perspective*a
         left_bottom_y  = 0.9 + config.perspective*e
@@ -294,6 +295,8 @@ class UnSuperPoint(nn.Module):
         self.decorr = 0.03
         position_A = self.get_position(Ap, flag='A', mat=mat)
         position_B = self.get_position(Bp, flag='B', mat=None)
+        # position_A = self.get_batch_position(Ap, flag='A', mat=mat)
+        # position_B = self.get_batch_position(Bp, flag='B', mat=None)
         G = self.getG(position_A,position_B)
 
         Usploss = self.usploss(As, Bs, mat, G)
@@ -325,6 +328,21 @@ class UnSuperPoint(nn.Module):
             res[:,x,:,i] = (i + Pamp[:,x,:,i]) * self.downsample
         for i in range(Pamp.shape[2]):
             res[:,y,i,:] = (i + Pamp[:,y,i,:]) * self.downsample
+        return res
+
+    def get_batch_position(self, Pamp, flag=None, mat=None):
+        x = 0
+        y = 1
+        res = torch.zeros_like(Pamp)
+        for i in range(Pamp.shape[3]):
+            res[:,x,:,i] = (i + Pamp[:,x,:,i]) * self.downsample
+        for i in range(Pamp.shape[2]):
+            res[:,y,i,:] = (i + Pamp[:,y,i,:]) * self.downsample
+        if flag == 'A':
+            r = torch.cat((Pamp, torch.ones((Pamp.shape[0], 1, Pamp.shape[2], Pamp.shape[3])).to(self.dev)), 1).permute(0, 2, 3, 1)
+            r = torch.matmul(r, mat.T.unsqueeze(1).unsqueeze(1).float())
+            r = torch.div(r,r[:,:,:,2].unsqueeze(3))
+            return r
         return res
 
     def get_position(self, Pmap, flag=None, mat=None):
@@ -366,9 +384,8 @@ class UnSuperPoint(nn.Module):
     def get_point_pair(self, G, As, Bs):
         self.correspond = 4
         A2B_min_Id = torch.argmin(G,dim=1)
-#        A2B_min_d = torch.min(G,dim=1)
         M = len(A2B_min_Id)
-        Id = G[list(range(M)),A2B_min_Id] > self.correspond
+        Id = G[list(range(M)),A2B_min_Id] <= self.correspond
         reshape_As = As.reshape(-1)
         reshape_Bs = Bs.reshape(-1)
         return (reshape_As[Id], reshape_Bs[A2B_min_Id[Id]], 
@@ -390,34 +407,28 @@ class UnSuperPoint(nn.Module):
         return loss
         
     def get_uni_xy(self, position):
-        i = torch.argsort(position) + 1
-        i = i.to(torch.float32)
+        i = torch.argsort(position).to(torch.float32)
         M = len(position)
-        return torch.mean(torch.pow(position - (i-1) / (M-1),2))
+        return torch.mean(torch.pow(position - i / (M-1),2))
 
     def descloss(self, DA, DB, G):
         self.d = 250
         self.m_p = 1
         self.m_n = 0.2
         c, h, w = DA.shape
-        # reshape_DA size = M, 256
-        reshape_DA = DA.reshape((c,-1)).permute(1,0)
-        # reshape_DB siez = 256, M
-        reshape_DB = DB.reshape((c,-1))
         C = G <= 8
         C_ = G > 8
-        AB = torch.matmul(reshape_DA, reshape_DB)
+        # reshape_DA size = M, 256; reshape_DB size = 256, M
+        AB = torch.matmul(DA.reshape((c,-1)).permute(1,0), DB.reshape((c,-1)))
         AB[C] = self.d * (self.m_p - AB[C])
         AB[C_] -= self.m_n
-        Id = AB < 0
-        AB[Id] = 0.0
-        return torch.mean(AB)
+        return torch.mean(torch.clamp(AB, min=0))
 
     def decorrloss(self, DA, DB):
         c, h, w = DA.shape
-        # reshape_DA size = 256,M
+        # reshape_DA size = 256, M
         reshape_DA = DA.reshape((c,-1))
-        # reshape_DB siez = 256, M
+        # reshape_DB size = 256, M
         reshape_DB = DB.reshape((c,-1))
         loss = 0
         loss += self.get_R_b(reshape_DA)
@@ -436,31 +447,32 @@ class UnSuperPoint(nn.Module):
 
     def predict(self, srcipath, transformpath):
         #bath = 1
-        srcimg = Image.open(srcipath)
-        transformimg = cv2.imread(transformpath)
-        transformimg_copy = Image.fromarray(cv2.cvtColor(transformimg,cv2.COLOR_BGR2RGB))
-        srcimg = transform_test(srcimg)
-        transformimg_copy = transform_test(transformimg_copy)
+        srcimg = cv2.imread(srcipath)
+        srcimg_copy = Image.fromarray(cv2.cvtColor(srcimg, cv2.COLOR_BGR2RGB))
+        transformimg = Image.open(transformpath)
+        srcimg_copy = transform_test(srcimg_copy)
+        transformimg = transform_test(transformimg)
 
-        srcimg = torch.unsqueeze(srcimg, 0)
-        transformimg_copy = torch.unsqueeze(transformimg_copy, 0)
+        srcimg_copy = torch.unsqueeze(srcimg_copy, 0)
+        transformimg = torch.unsqueeze(transformimg, 0)
 
-        srcimg = srcimg.to(self.dev)
-        transformimg_copy = transformimg_copy.to(self.dev)
-        As,Ap,Ad = self.forward(srcimg)
-        Bs,Bp,Bd = self.forward(transformimg_copy)
+        srcimg_copy = srcimg_copy.to(self.dev)
+        transformimg = transformimg.to(self.dev)
+        As,Ap,Ad = self.forward(srcimg_copy)
+        Bs,Bp,Bd = self.forward(transformimg)
 
         h,mask = self.get_homography(Ap[0], Ad[0], Bp[0], Bd[0], As[0],Bs[0])
-        im1Reg = cv2.warpPerspective(transformimg, h, (self.w, self.h))
-        cv2.imwrite('pre.jpg',im1Reg)        
+        im1Reg = cv2.warpPerspective(srcimg, h, (self.w, self.h))
+        print(h)
+        cv2.imwrite('pre.jpg',im1Reg)
         
     def get_homography(self, Ap, Ad, Bp, Bd, As, Bs):
         Amap = self.get_position(Ap)
         Bmap = self.get_position(Bp)
 
         points1, points2 = self.get_match_point(Amap, Ad, Bmap, Bd, As, Bs)
-        srcpath = '/home/ldl/deep-high-resolution-net.pytorch-master/data/coco/images/src.jpg'
-        transformpath = '/home/ldl/deep-high-resolution-net.pytorch-master/data/coco/images/test_3.jpg'
+        srcpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/1.ppm'
+        transformpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/4.ppm'
         img = cv2.imread(srcpath)
         img_dst = cv2.imread(transformpath)
         
@@ -469,11 +481,11 @@ class UnSuperPoint(nn.Module):
         point_size = 1
         def random_color():
             return (random.randint(0,255), random.randint(0,255),random.randint(0,255))
-#        point_color = (0, 0, 255) # BGR
-        thickness = 4 # 可以为 0 、4、8
+        # point_color = (0, 0, 255) # BGR
+        thickness = 4 # 0 、4、8
         print(len(map))
 
-        # 要画的点的坐标
+        # points to be visualized
         points_list = [(int(map[i,0]),int(map[i,1])) for i in range(len(map))]
         points_list_dst = [(int(map_dst[i,0]),int(map_dst[i,1])) for i in range(len(map))]
         
@@ -482,7 +494,7 @@ class UnSuperPoint(nn.Module):
             cv2.circle(img , point, point_size, color, thickness)
             cv2.circle(img_dst , points_list_dst[i], point_size, color, thickness)
                    
-        cv2.imwrite('可视化_z.jpg',img)
+        cv2.imwrite('visualization_src.jpg',img)
         
 #        img = cv2.imread(srcpath)
 #        map = points1
@@ -490,10 +502,10 @@ class UnSuperPoint(nn.Module):
 #        print(points_list)
 #        for point in points_list:
 #            cv2.circle(img , point, point_size, point_color, thickness)
-        cv2.imwrite('可视化_dst.jpg',img_dst)
-        print(points1)
-        print(points2)
-        h, mask = cv2.findHomography(points2, points1, cv2.RANSAC)
+        cv2.imwrite('visualization_dst.jpg',img_dst)
+        # print(points1)
+        # print(points2)
+        h, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
         return h,mask
     
     def get_match_point(self, Amap, Ad, Bmap, Bd, As, Bs):
@@ -528,7 +540,7 @@ class UnSuperPoint(nn.Module):
         print(A2B_Id.shape)
 
         finish_Id = A2B_Id == match_B2A
-        print(torch.argmax(finish_Id),'_______________')       
+        # print(torch.argmax(finish_Id.int()),'_______________')       
 #        s_th = 0.0
 #        A_S = reshape_As > s_th
 #        B_S = reshape_Bs > s_th
@@ -539,7 +551,7 @@ class UnSuperPoint(nn.Module):
 #        
 #        
 #        finish_Id *= (S_id * desc_id)
-        print(torch.sum(finish_Id))       
+        # print(torch.sum(finish_Id))       
         points1 = reshape_Ap[finish_Id]
         points2 = reshape_Bp[A2B_nearest_Id[finish_Id]]
 
@@ -548,10 +560,10 @@ class UnSuperPoint(nn.Module):
         # Id = torch.zeros_like(A2B_nearest, dtype=torch.uint8)
         # for i in range(len(A2B_nearest)):
 def simple_train():
-    batch_size = 1
-    epochs = 1  
+    batch_size = 10
+    epochs = 1
     learning_rate = 0.0001
-    dataset = Picture('/home/administrator/桌面/unsuperpoint/a',transform)
+    dataset = Picture('/home/sinjeong/gitpjt/pytorch-superpoint/datasets/COCO/train2014',transform)
     trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=4, 
                          shuffle=True, drop_last=True)
     model = UnSuperPoint()
@@ -559,62 +571,84 @@ def simple_train():
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device('cpu')
     model.to(dev)
     optimizer = optim.SGD(model.parameters(),lr=learning_rate, momentum=0.9)
-    for epoch in range(1,epochs+1):
-        e = 0
-        for batch_idx, (img0, img1, mat) in enumerate(trainloader):
-            # print(img0.shape,img1.shape)
-            img0 = img0.to(dev)
-            img1 = img1.to(dev)
-            mat = mat.squeeze()
-            mat = mat.to(dev)                     
-            optimizer.zero_grad()
-            s1,p1,d1 = model(img0)
-            s2,p2,d2 = model(img1)
-            # print(s1.shape[2],s2.shape,p1.shape,p2.shape,d1.shape,d2.shape,mat.shape)
-            loss = model.UnSuperPointLoss(s1,p1,d1,s2,p2,d2,mat)
-            loss.backward()
-            optimizer.step()
-            e += loss.item()
-            # if batch_idx % 10 == 9:
-            print('Train Epoch: {} [{}/{} ]\t Loss: {:.6f}'.format(epoch, batch_idx * len(img0), len(trainloader.dataset),e))
-            e = 0
-    torch.save(model.state_dict(),'/home/administrator/桌面/unsuperpoint_allre8.pkl')
+    try:
+        for epoch in range(1,epochs+1):
+            error = 0
+            for batch_idx, (img0, img1, mat) in enumerate(trainloader):
+                # print(img0.shape,img1.shape)
+                img0 = img0.to(dev)
+                img1 = img1.to(dev)
+                mat = mat.squeeze()
+                mat = mat.to(dev)                     
+                optimizer.zero_grad()
+                s1,p1,d1 = model(img0)
+                s2,p2,d2 = model(img1)
+                # TODO: All code does not consider batch_size larger than 1
+                s1 = torch.squeeze(s1, 0); s2 = torch.squeeze(s2, 0)
+                p1 = torch.squeeze(p1, 0); p2 = torch.squeeze(p2, 0)
+                d1 = torch.squeeze(d1, 0); d2 = torch.squeeze(d2, 0)
+                # print(s1.shape,s2.shape,p1.shape,p2.shape,d1.shape,d2.shape,mat.shape)
+                # loss = model.UnSuperPointLoss(s1,p1,d1,s2,p2,d2,mat)
+                loss = model.loss(s1,p1,d1,s2,p2,d2,mat)
+                loss.backward()
+                optimizer.step()
+                error += loss.item()
+                # if batch_idx % 10 == 9:
+                print('Train Epoch: {} [{}/{} ]\t Loss: {:.6f}'.format(epoch, batch_idx * len(img0), len(trainloader.dataset),error))
+                error = 0
+        torch.save(model.state_dict(),'/home/sinjeong/unsuperpoint_allre9.pkl')
+    except KeyboardInterrupt:
+        print ("press ctrl + c, save model!")
+        torch.save(model.state_dict(),'/home/sinjeong/unsuperpoint_allre9.pkl')
+        pass
 
 if __name__ == '__main__':
-    modul = UnSuperPoint()
-    modul.load_state_dict(torch.load('/home/ldl/桌面/project/UnSuperPoint/unsuperpoint_allre8.pkl'))
-    modul.to(modul.dev)
-    modul.train(False)
-    with torch.no_grad():
-        srcpath = '/home/ldl/deep-high-resolution-net.pytorch-master/data/coco/images/src.jpg'
-        transformpath = '/home/ldl/deep-high-resolution-net.pytorch-master/data/coco/images/test_3.jpg'
-        modul.predict(srcpath, transformpath)
+    # add parser
+    parser = argparse.ArgumentParser()
 
-        # transformimg = cv2.imread(transformpath)
-        # transformimg_copy = Image.fromarray(cv2.cvtColor(transformimg,cv2.COLOR_BGR2RGB))
-        # transformimg_copy = transform_test(transformimg_copy)
+    # Training command
+    parser.add_argument('--train', action='store_true', default=False, help='Do training')
 
-        # transformimg_copy = torch.unsqueeze(transformimg_copy,0)
-        # transformimg_copy = transformimg_copy.to(modul.dev)
-        # _,Ap,Ad = modul.forward(transformimg_copy)
-        # map = modul.get_position(Ap[0])
-        # map = map.reshape((2,-1)).permute(1,0)
-        # print(map)
-        # map = map.cpu().numpy()
-        # map = np.round(map)
+    args = parser.parse_args()
+
+    if args.train:
+        simple_train()
+
+    else:
+        model = UnSuperPoint()
+        model.load_state_dict(torch.load('/home/sinjeong/unsuperpoint_allre9.pkl'))
+        model.to(model.dev)
+        model.train(False)
+        with torch.no_grad():
+            srcpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/1.ppm'
+            transformpath = '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches/v_maskedman/4.ppm'
+            model.predict(srcpath, transformpath)
+
+            # transformimg = cv2.imread(transformpath)
+            # transformimg_copy = Image.fromarray(cv2.cvtColor(transformimg,cv2.COLOR_BGR2RGB))
+            # transformimg_copy = transform_test(transformimg_copy)
+
+            # transformimg_copy = torch.unsqueeze(transformimg_copy,0)
+            # transformimg_copy = transformimg_copy.to(modul.dev)
+            # _,Ap,Ad = modul.forward(transformimg_copy)
+            # map = modul.get_position(Ap[0])
+            # map = map.reshape((2,-1)).permute(1,0)
+            # print(map)
+            # map = map.cpu().numpy()
+            # map = np.round(map)
 
 
-        # point_size = 1
-        # point_color = (0, 0, 255) # BGR
-        # thickness = 4 # 可以为 0 、4、8
-        # print(len(map))
+            # point_size = 1
+            # point_color = (0, 0, 255) # BGR
+            # thickness = 4 # 可以为 0 、4、8
+            # print(len(map))
 
-        # # 要画的点的坐标
-        # points_list = [(int(map[i,0]),int(map[i,1])) for i in range(len(map))]
-        # print(points_list)
-        # for point in points_list:
-        #     cv2.circle(transformimg , point, point_size, point_color, thickness)
-        # cv2.imwrite('可视化_.jpg',transformimg)
+            # # 要画的点的坐标
+            # points_list = [(int(map[i,0]),int(map[i,1])) for i in range(len(map))]
+            # print(points_list)
+            # for point in points_list:
+            #     cv2.circle(transformimg , point, point_size, point_color, thickness)
+            # cv2.imwrite('可视化_.jpg',transformimg)
         
 
 
