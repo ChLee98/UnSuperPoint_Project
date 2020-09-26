@@ -1,6 +1,10 @@
 data:
   dataset: 'Coco'
   root: '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/COCO'
+  perspective: 0.1
+  resize: [240, 320]
+  scale: 0.3
+  rot: 30
 
 training:
   learning_rate: 0.0001

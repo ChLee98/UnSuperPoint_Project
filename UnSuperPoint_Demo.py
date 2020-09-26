@@ -556,9 +556,9 @@ def simple_train(config, output_dir, args):
     batch_size = config['training']['batch_size_train']
     epochs = config['training']['epoch_train']
     learning_rate = config['training']['learning_rate']
-    datapath = os.path.join(confing['data']['root'], COCO_TRAIN)
+    datapath = os.path.join(config['data']['root'], COCO_TRAIN)
     savepath = os.path.join(output_dir, 'checkpoints')
-    os.makedirs(save_path, exist_ok=True)
+    os.makedirs(savepath, exist_ok=True)
 
     with open(os.path.join(output_dir, 'config.yml'), 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
@@ -570,7 +570,7 @@ def simple_train(config, output_dir, args):
                         shuffle=True, drop_last=True)
 
     # Prepare for model
-    model = UnSuperPoint()
+    model = UnSuperPoint(config)
     model.train()
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device('cpu')
     model.to(dev)
