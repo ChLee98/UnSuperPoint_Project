@@ -2,7 +2,12 @@
 ## Conducted as a part of URP @ KAIST
 ## How to train
 ```
-python UnSuperPoint_Demo.py config/train.yaml unsuperpoint
+python main.py train <CONFIGURATION> <EXPORTNAME>
+```
+
+## How to test
+```
+python main.py test <CONFIGURATION> <EXPORTNAME> <MODELNAME>
 ```
 
 ## TODO
