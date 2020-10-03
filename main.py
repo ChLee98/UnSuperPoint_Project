@@ -7,11 +7,18 @@ import torch.optim as optim
 import yaml
 import argparse
 from tqdm import tqdm
+import logging
 
 from settings import *
 
-from dataset import Picture, transform
+from utils.loader import dataLoader, testLoader
 from model import UnSuperPoint
+
+###### util functions ######
+def datasize(train_loader, config, tag='train'):
+    logging.info('== %s split size %d in %d batches'%\
+    (tag, len(train_loader)*config['training']['batch_size_train'], len(train_loader)))
+    pass
 
 def simple_train(config, output_dir, args):
     batch_size = config['training']['batch_size_train']
@@ -24,10 +31,15 @@ def simple_train(config, output_dir, args):
         yaml.dump(config, f, default_flow_style=False)
 
     # Prepare for data loader
-    dataset = Picture(config, transform)
-    trainloader = DataLoader(dataset, batch_size=batch_size,
-                        num_workers=config['training']['workers_train'],
-                        shuffle=True, drop_last=True)
+    # dataset = Picture(config, transform)
+    # trainloader = DataLoader(dataset, batch_size=batch_size,
+    #                     num_workers=config['training']['workers_train'],
+    #                     shuffle=True, drop_last=True)
+    data = dataLoader(config, dataset=config['data']['dataset'], warp_input=True)
+    trainloader, valloader = data['train_loader'], data['val_loader']
+
+    datasize(trainloader, config, tag='train')
+    datasize(valloader, config, tag='val')
 
     # Prepare for model
     model = UnSuperPoint(config)
@@ -82,18 +94,25 @@ def simple_train(config, output_dir, args):
         torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
         pass
 
+@torch.no_grad()
 def simple_test(config, output_dir, args):
     model_path = os.path.join(output_dir, 'checkpoints', args.model_name)
     savepath = os.path.join(output_dir, 'results')
     os.makedirs(savepath, exist_ok=True)
+
+    # Prepare for data loader
+    data = testLoader(config, dataset=config['data']['dataset'], warp_input=True)
+    testloader = data['test_loader']
     
+    # Prepare for model
     model = UnSuperPoint()
     model.load_state_dict(torch.load(model_path))
     model.to(model.dev)
     model.train(False)
-    with torch.no_grad():
-        model.predict(os.path.join(config['data']['root'], HPatches_SRC),\
-                    os.path.join(config['data']['root'], HPatches_DST), savepath)
+
+    # Do prediction
+    model.predict(os.path.join(config['data']['root'], HPatches_SRC),\
+                os.path.join(config['data']['root'], HPatches_DST), savepath)
 
 if __name__ == '__main__':
     # add parser

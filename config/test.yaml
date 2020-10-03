@@ -1,7 +1,9 @@
 data:
-  dataset: 'HPatches'
-  root: '/home/sinjeong/gitpjt/pytorch-superpoint/datasets/HPatches'
-  perspective: 0.1
-  resize: [240, 320]
-  scale: 0.3
-  rot: 30
+  name: 'patches_dataset'
+  dataset: 'hpatches'  # 'coco' 'hpatches'
+  alteration: 'all'  # 'all' 'i' 'v'
+  preprocessing:
+    resize: [240, 320]  # [240, 320] for HPatches and False for coco
+
+testing:
+  workers_test: 1

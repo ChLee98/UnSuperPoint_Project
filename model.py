@@ -8,7 +8,15 @@ import torch
 import torch.nn as nn
 
 from settings import DEFAULT_SETTING
-from dataset import transform_test
+
+# TEMP
+import torchvision.transforms as transforms
+
+transform_test = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize([0.5,0.5,0.5],[1/0.225,1/0.225,1/0.225])
+])
+# -----
 
 class UnSuperPoint(nn.Module):
     def __init__(self, config=None):
@@ -267,6 +275,7 @@ class UnSuperPoint(nn.Module):
         return torch.sum(molecular / denominator - one) / (F * (F-1))
 
     def predict(self, srcipath, transformpath, output_dir):
+        # TODO: predict function should take pre-process independent data
         srcimg = cv2.imread(srcipath)
         srcimg_copy = Image.fromarray(cv2.cvtColor(srcimg, cv2.COLOR_BGR2RGB))
         transformimg = cv2.imread(transformpath)

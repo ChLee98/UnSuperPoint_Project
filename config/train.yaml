@@ -9,7 +9,7 @@ data:
 training:
   learning_rate: 0.0001
 
-  epoch_train: 10
+  epoch_train: 1
   workers_train: 4
   batch_size_train: 5
 

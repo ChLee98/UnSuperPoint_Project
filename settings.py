@@ -2,6 +2,8 @@
 paths defined here are used in many places
 """
 
+DATA_PATH = 'datasets'
+
 EXPORT_PATH = 'logs'
 
 COCO_TRAIN = 'train2014'
