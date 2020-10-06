@@ -13,7 +13,8 @@ python main.py test <CONFIGURATION> <EXPORTNAME> <MODELNAME>
 ## TODO
  - [ ] Tensorboard writer should be used for easy debug
  - [ ] All code does not consider batch_size larger than 1
- - [ ] Evaluation/Test code should be implemented
+ - [x] Evaluation/Test code should be implemented
+ - [ ] Evaluation code should use ground truth homography
  - [ ] Optimizer should be changed to Adam
  
 ## Acknowledgments：

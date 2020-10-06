@@ -16,6 +16,8 @@ DEFAULT_SETTING = {
     'model': {
         'name': 'UnsuperPoint_single',
         'correspondence_threshold': 4,
+        'detection_threshold': 0.015,
+        'nn_thresh': 1.0,
         'usp_loss': {
             'alpha_usp': 1,
             'alpha_position': 1,

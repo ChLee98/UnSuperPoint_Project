@@ -42,3 +42,8 @@ def Myresize(img, size):
         img = img[top: top + new_h,
                             left: left + new_w]
         return img
+
+# torch
+# from utils.tools import squeezeToNumpy
+def squeezeToNumpy(tensor_arr):
+    return tensor_arr.detach().cpu().numpy().squeeze()

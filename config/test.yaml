@@ -1,9 +1,13 @@
 data:
+  root: 'datasets/HPatches' # tmp
+
   name: 'patches_dataset'
   dataset: 'hpatches'  # 'coco' 'hpatches'
   alteration: 'all'  # 'all' 'i' 'v'
   preprocessing:
     resize: [240, 320]  # [240, 320] for HPatches and False for coco
+
+front_end_model: 'UnSuperPoint'
 
 testing:
   workers_test: 1

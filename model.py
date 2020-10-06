@@ -33,7 +33,10 @@ class UnSuperPoint(nn.Module):
         self.m_n = config['model']['desc_loss']['margin_negative']
         self.decorr = config['model']['decorr_loss']['alpha_decorr']
         self.correspond = config['model']['correspondence_threshold']
+        self.conf_thresh = config['model']['detection_threshold']
+        self.nn_thresh = config['model']['nn_thresh']
 
+        self.border_remove = 4  # Remove points this close to the border.
         self.downsample = 8
         self.dev = torch.device("cuda") if torch.cuda.is_available() else torch.device('cpu')
         self.cnn = nn.Sequential(
@@ -273,6 +276,44 @@ class UnSuperPoint(nn.Module):
         denominator = torch.sqrt(torch.matmul(V_v_2, V_v_2.transpose(1,0)))
         one = torch.eye(F).to(self.dev)
         return torch.sum(molecular / denominator - one) / (F * (F-1))
+
+    def getPtsDescFromHeatmap(self, point, heatmap, desc):
+        '''
+        :param self:
+        :param point:
+            np (2, Hc, Wc)
+        :param heatmap:
+            np (Hc, Wc)
+        :param desc:
+            np (256, Hc, Wc)
+        :return:
+        '''
+        heatmap = heatmap.squeeze()
+        desc = desc.squeeze()
+        # print("heatmap sq:", heatmap.shape)
+        H = heatmap.shape[0]*self.downsample
+        W = heatmap.shape[1]*self.downsample
+        xs, ys = np.where(heatmap >= self.conf_thresh)  # Confidence threshold.
+        if len(xs) == 0:
+            return np.zeros((3, 0))
+        pts = np.zeros((3, len(xs)))  # Populate point data sized 3xN.
+        pts[0, :] = point[0, xs, ys] # abuse of ys, xs
+        pts[1, :] = point[1, xs, ys]
+        pts[2, :] = heatmap[xs, ys]  # check the (x, y) here
+        desc = desc[:, xs, ys]
+
+        inds = np.argsort(pts[2, :])
+        pts = pts[:, inds[::-1]]  # Sort by confidence.
+        desc = desc[:, inds[::-1]]
+
+        # Remove points along border.
+        bord = self.border_remove
+        toremoveW = np.logical_or(pts[0, :] < bord, pts[0, :] >= (W - bord))
+        toremoveH = np.logical_or(pts[1, :] < bord, pts[1, :] >= (H - bord))
+        toremove = np.logical_or(toremoveW, toremoveH)
+        pts = pts[:, ~toremove]
+        desc = desc[:, ~toremove]
+        return pts[:, :300], desc[:, :300]
 
     def predict(self, srcipath, transformpath, output_dir):
         # TODO: predict function should take pre-process independent data

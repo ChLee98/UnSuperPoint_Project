@@ -60,11 +60,11 @@ class PatchesDataset(Dataset):
             # s = max(self.sizer /image.shape[:2])
             # image = image[:int(self.sizer[0]/s),:int(self.sizer[1]/s)]
             image = cv2.resize(image, (self.sizer[1], self.sizer[0]))
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            # image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             if image.ndim == 2:
                 image = image[:,:, np.newaxis]
             
-            image = Image.fromarray(image.astype('float32') / 255.0)
+            image = Image.fromarray(image)
             if self.transform is not None:
                 image = self.transform(image)
             return image

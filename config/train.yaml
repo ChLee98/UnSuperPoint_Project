@@ -9,7 +9,7 @@ data:
 training:
   learning_rate: 0.0001
 
-  epoch_train: 1
+  epoch_train: 10
   workers_train: 4
   batch_size_train: 5
 
@@ -20,6 +20,8 @@ model:
   name: 'UnsuperPoint_single'
   
   correspondence_threshold: 4
+  detection_threshold: 0.015
+  nn_thresh: 1.0
   
   usp_loss:
     alpha_usp: 1
