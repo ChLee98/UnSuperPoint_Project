@@ -6,6 +6,7 @@ from PIL import Image
 import cv2
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 from settings import DEFAULT_SETTING
 
@@ -21,20 +22,21 @@ transform_test = transforms.Compose([
 class UnSuperPoint(nn.Module):
     def __init__(self, config=None):
         super(UnSuperPoint, self).__init__()
+        self.config = config
         if not config:
-            config = DEFAULT_SETTING
-        self.usp = config['model']['usp_loss']['alpha_usp']
-        self.position_weight = config['model']['usp_loss']['alpha_position']
-        self.score_weight = config['model']['usp_loss']['alpha_score']
-        self.uni_xy = config['model']['unixy_loss']['alpha_unixy']
-        self.desc = config['model']['desc_loss']['alpha_desc']
-        self.d = config['model']['desc_loss']['lambda_d']
-        self.m_p = config['model']['desc_loss']['margin_positive']
-        self.m_n = config['model']['desc_loss']['margin_negative']
-        self.decorr = config['model']['decorr_loss']['alpha_decorr']
-        self.correspond = config['model']['correspondence_threshold']
-        self.conf_thresh = config['model']['detection_threshold']
-        self.nn_thresh = config['model']['nn_thresh']
+            self.config = DEFAULT_SETTING
+        self.usp = self.config['model']['usp_loss']['alpha_usp']
+        self.position_weight = self.config['model']['usp_loss']['alpha_position']
+        self.score_weight = self.config['model']['usp_loss']['alpha_score']
+        self.uni_xy = self.config['model']['unixy_loss']['alpha_unixy']
+        self.desc = self.config['model']['desc_loss']['alpha_desc']
+        self.d = self.config['model']['desc_loss']['lambda_d']
+        self.m_p = self.config['model']['desc_loss']['margin_positive']
+        self.m_n = self.config['model']['desc_loss']['margin_negative']
+        self.decorr = self.config['model']['decorr_loss']['alpha_decorr']
+        self.correspond = self.config['model']['correspondence_threshold']
+        self.conf_thresh = self.config['model']['detection_threshold']
+        self.nn_thresh = self.config['model']['nn_thresh']
 
         self.border_remove = 4  # Remove points this close to the border.
         self.downsample = 8
@@ -121,14 +123,62 @@ class UnSuperPoint(nn.Module):
         desc = torch.nn.functional.grid_sample(d, samp_pts)
         return desc
 
+    def tb_add_loss(self, loss, task='train'):
+        for k in loss:
+            self.writer.add_scalar('{}/{}'.format(task, k), loss[k].item(), self.step)
+
+    @torch.no_grad()
+    def tb_add_hist(self, name, ts, bin=100, task='train'):
+        f = plt.figure()
+        plt.hist(ts.reshape(-1).cpu().numpy(), bin, density=True)
+        plt.close()
+        self.writer.add_figure('{}/{}'.format(task, name), f, self.step)
+
+    def train_val_step(self, img0, img1, mat, task='train'):
+        img0 = img0.to(self.dev)
+        img1 = img1.to(self.dev)
+        mat = mat.squeeze()
+        mat = mat.to(self.dev)
+        self.optimizer.zero_grad()
+        s1,p1,d1 = self.forward(img0)
+        s2,p2,d2 = self.forward(img1)
+        # TODO: All code does not consider batch_size larger than 1
+        s1 = torch.squeeze(s1, 0); s2 = torch.squeeze(s2, 0)
+        p1 = torch.squeeze(p1, 0); p2 = torch.squeeze(p2, 0)
+        d1 = torch.squeeze(d1, 0); d2 = torch.squeeze(d2, 0)
+        # print(s1.shape,s2.shape,p1.shape,p2.shape,d1.shape,d2.shape,mat.shape)
+        # loss = model.UnSuperPointLoss(s1,p1,d1,s2,p2,d2,mat)
+        lossdict = self.loss(s1,p1,d1,s2,p2,d2,mat)
+        self.tb_add_loss(lossdict, task)
+
+        if task == 'train' and self.step % self.config['tensorboard_interval'] == 0:
+            self.tb_add_hist('left/x_relative', p1[0])
+            self.tb_add_hist('left/y_relative', p1[1])
+            self.tb_add_hist('right/x_relative', p2[0])
+            self.tb_add_hist('right/y_relative', p2[1])
+
+        lossdict['loss'].backward()
+        self.optimizer.step()
+
+        return lossdict['loss'].item()
+
     def loss(self, bath_As, bath_Ap, bath_Ad, 
         bath_Bs, bath_Bp, bath_Bd, mat):
-        loss = 0
+        usp = 0; unixy = 0; desc = 0; decorr = 0
         bath = bath_As.shape[0]
         for i in range(bath):
-            loss += self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
-        bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
-        return loss / bath
+            t1, t2, t3, t4 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
+                                        bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
+            usp += t1; unixy += t2; desc += t3; decorr += t4
+        loss = usp + unixy + desc + decorr
+        lossdict = {
+            "loss": loss/bath,
+            "usp_loss": usp/bath,
+            "uni_xy_loss": unixy/bath,
+            "descriptor_loss": desc/bath,
+            "decorrelation_loss": decorr/bath
+        }
+        return lossdict
 
     def UnSuperPointLoss(self, As, Ap, Ad, Bs, Bp, Bd, mat):
         position_A = self.get_position(Ap, flag='A', mat=mat)
@@ -142,8 +192,8 @@ class UnSuperPoint(nn.Module):
         
         Descloss = self.descloss(Ad, Bd, G)
         Decorrloss = self.decorrloss(Ad, Bd)
-        return (self.usp * Usploss + self.uni_xy * Uni_xyloss +
-            self.desc * Descloss + self.decorr *Decorrloss)
+        return self.usp * Usploss, self.uni_xy * Uni_xyloss,\
+            self.desc * Descloss, self.decorr * Decorrloss
 
     def usploss(self, As, Bs, mat, G):
         reshape_As_k, reshape_Bs_k, d_k = self.get_point_pair(
@@ -239,7 +289,7 @@ class UnSuperPoint(nn.Module):
         for i in range(2):
             loss += self.get_uni_xy(reshape_PA[:,i])
             loss += self.get_uni_xy(reshape_PB[:,i])
-        return loss
+        return loss/4
         
     def get_uni_xy(self, position):
         i = torch.argsort(position).to(torch.float32)
@@ -315,8 +365,8 @@ class UnSuperPoint(nn.Module):
         desc = desc[:, ~toremove]
         return pts[:, :300], desc[:, :300]
 
+    # TODO: No more need; eliminate this part
     def predict(self, srcipath, transformpath, output_dir):
-        # TODO: predict function should take pre-process independent data
         srcimg = cv2.imread(srcipath)
         srcimg_copy = Image.fromarray(cv2.cvtColor(srcimg, cv2.COLOR_BGR2RGB))
         transformimg = cv2.imread(transformpath)

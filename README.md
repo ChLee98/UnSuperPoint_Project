@@ -10,6 +10,11 @@ python main.py train <CONFIGURATION> <EXPORTNAME>
 python main.py test <CONFIGURATION> <EXPORTNAME> <MODELNAME>
 ```
 
+## Tensorboard
+```
+tensorboard --logdir=./runs/ [--host | static_ip_address] [--port | 6008]
+```
+
 ## TODO
  - [ ] Tensorboard writer should be used for easy debug
  - [ ] All code does not consider batch_size larger than 1

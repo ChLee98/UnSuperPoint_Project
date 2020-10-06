@@ -3,6 +3,7 @@ import torch
 
 from torch.utils.data import DataLoader
 import torch.optim as optim
+from tensorboardX import SummaryWriter
 
 import yaml
 import argparse
@@ -16,6 +17,7 @@ from settings import *
 from model_wrap import PointTracker
 
 from utils.loader import dataLoader, testLoader
+from utils.utils import getWriterPath
 from model import UnSuperPoint
 
 ###### util functions ######
@@ -47,36 +49,23 @@ def simple_train(config, output_dir, args):
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device('cpu')
     model.to(dev)
 
-    # Do optimization
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
+    # Prepare for tensorboard writer
+    model.writer = SummaryWriter(getWriterPath(task=args.command, 
+        exper_name=args.export_name, date=True))
+
+    # Prepare for optimizer
+    model.optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
     whole_step = 0
     total = len(trainloader)
     try:
         for epoch in tqdm(range(1, epochs+1), desc='epoch'):
-            error = 0
             for batch_idx, (img0, img1, mat) in tqdm(enumerate(trainloader), desc='step', total=total):
                 whole_step += 1
+                model.step = whole_step
 
-                # print(img0.shape,img1.shape)
-                img0 = img0.to(dev)
-                img1 = img1.to(dev)
-                mat = mat.squeeze()
-                mat = mat.to(dev)                     
-                optimizer.zero_grad()
-                s1,p1,d1 = model(img0)
-                s2,p2,d2 = model(img1)
-                # TODO: All code does not consider batch_size larger than 1
-                s1 = torch.squeeze(s1, 0); s2 = torch.squeeze(s2, 0)
-                p1 = torch.squeeze(p1, 0); p2 = torch.squeeze(p2, 0)
-                d1 = torch.squeeze(d1, 0); d2 = torch.squeeze(d2, 0)
-                # print(s1.shape,s2.shape,p1.shape,p2.shape,d1.shape,d2.shape,mat.shape)
-                # loss = model.UnSuperPointLoss(s1,p1,d1,s2,p2,d2,mat)
-                loss = model.loss(s1,p1,d1,s2,p2,d2,mat)
-                loss.backward()
-                optimizer.step()
-                error += loss.item()
+                loss = model.train_val_step(img0, img1, mat, 'train')
 
-                tqdm.write('Loss: {:.6f}'.format(error))
+                tqdm.write('Loss: {:.6f}'.format(loss))
                 
                 if whole_step % config['save_interval'] == 0:
                     torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
@@ -84,8 +73,6 @@ def simple_train(config, output_dir, args):
                 if args.eval and whole_step % config['validation_interval'] == 0:
                     # TODO: Validation code should be implemented
                     pass
-
-                error = 0
 
         torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
 
