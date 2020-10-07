@@ -154,8 +154,10 @@ class UnSuperPoint(nn.Module):
         if task == 'train' and self.step % self.config['tensorboard_interval'] == 0:
             self.tb_add_hist('left/x_relative', p1[0])
             self.tb_add_hist('left/y_relative', p1[1])
+            self.tb_add_hist('left/score', s1)
             self.tb_add_hist('right/x_relative', p2[0])
             self.tb_add_hist('right/y_relative', p2[1])
+            self.tb_add_hist('right/score', s2)
 
         lossdict['loss'].backward()
         self.optimizer.step()
@@ -167,14 +169,18 @@ class UnSuperPoint(nn.Module):
         usp = 0; unixy = 0; desc = 0; decorr = 0
         bath = bath_As.shape[0]
         for i in range(bath):
-            t1, t2, t3, t4 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
+            # t1, t2, t3, t4 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
+            #                             bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
+            # usp += t1; unixy += t2; desc += t3; decorr += t4
+            t1, t2, t3 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
                                         bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
-            usp += t1; unixy += t2; desc += t3; decorr += t4
-        loss = usp + unixy + desc + decorr
+            usp += t1; desc += t2; decorr += t3
+        # loss = usp + unixy + desc + decorr
+        loss = usp + desc + decorr
         lossdict = {
             "loss": loss/bath,
             "usp_loss": usp/bath,
-            "uni_xy_loss": unixy/bath,
+            #"uni_xy_loss": unixy/bath,
             "descriptor_loss": desc/bath,
             "decorrelation_loss": decorr/bath
         }
@@ -192,7 +198,9 @@ class UnSuperPoint(nn.Module):
         
         Descloss = self.descloss(Ad, Bd, G)
         Decorrloss = self.decorrloss(Ad, Bd)
-        return self.usp * Usploss, self.uni_xy * Uni_xyloss,\
+        # return self.usp * Usploss, self.uni_xy * Uni_xyloss,\
+        #     self.desc * Descloss, self.decorr * Decorrloss
+        return self.usp * Usploss,\
             self.desc * Descloss, self.decorr * Decorrloss
 
     def usploss(self, As, Bs, mat, G):

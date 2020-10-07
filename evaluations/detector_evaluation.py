@@ -147,6 +147,26 @@ def warp_keypoints(keypoints, H):
     warped_points = np.dot(homogeneous_points, np.transpose(H))
     return warped_points[:, :2] / warped_points[:, 2:]
 
+def getInliers(matches, H, epi=3, verbose=False):
+    """
+    input:
+        matches: numpy (n, 4(x1, y1, x2, y2))
+        H (ground truth homography): numpy (3, 3)
+    """
+    # from evaluations.detector_evaluation import warp_keypoints
+    # warp points 
+    warped_points = warp_keypoints(matches[:, :2], H) # make sure the input fits the (x,y)
+
+    # compute point distance
+    norm = np.linalg.norm(warped_points - matches[:, 2:4],
+                            ord=None, axis=1)
+    inliers = norm < epi
+    if verbose:
+        print("Total matches: ", inliers.shape[0], ", inliers: ", inliers.sum(),
+                            ", percentage: ", inliers.sum() / inliers.shape[0])
+
+    return inliers
+
 def compute_repeatability(data, keep_k_points=300,
                           distance_thresh=3, verbose=False):
     """

@@ -20,7 +20,7 @@ def get_paths(exper_name):
     return glob(osp.join(EXPORT_PATH, 'outputs/{}/*.npz'.format(exper_name)))
 
 
-def keep_shared_points(keypoint_map, H, keep_k_points=1000):
+def keep_shared_points(keypoint_map, H, keep_k_points=300):
     """
     Compute a list of keypoints from the map, filter the list of points by keeping
     only the points that once mapped by H are still inside the shape of the map
@@ -57,7 +57,7 @@ def keep_shared_points(keypoint_map, H, keep_k_points=1000):
 
     return keypoints.astype(int)
 
-def compute_homography(data, keep_k_points=1000, correctness_thresh=3, orb=False, shape=(240,320)):
+def compute_homography(data, keep_k_points=300 correctness_thresh=3, orb=False, shape=(240,320)):
     """
     Compute the homography between 2 sets of detections and descriptors inside data.
     """
@@ -111,7 +111,8 @@ def compute_homography(data, keep_k_points=1000, correctness_thresh=3, orb=False
                                     m_warped_keypoints[:, [1, 0]],
                                     cv2.RANSAC)
 
-    # inliers = getInliers(matches, H, 3, False)
+    # from detector_evaluation import getInliers
+    # inliers = getInliers(matches, real_H, 3, False)
 
     # H, inliers = cv2.findHomography(matches_pts[:, [1, 0]],
     #                                 matches_pts[:, [3, 2]],
@@ -154,7 +155,7 @@ def compute_homography(data, keep_k_points=1000, correctness_thresh=3, orb=False
             'cv2_matches': cv2_matches,
             'mscores': m_dist/(m_dist.max()), # normalized distance
             'inliers': inliers,
-            'homography': H,
+            'homography': H, # Estimated homography
             'mean_dist': mean_dist
             }
 

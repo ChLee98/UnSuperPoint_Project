@@ -10,7 +10,7 @@ matplotlib.use('Agg') # solve error of tk
 
 import numpy as np
 from evaluations.descriptor_evaluation import compute_homography
-from evaluations.detector_evaluation import compute_repeatability
+from evaluations.detector_evaluation import compute_repeatability, getInliers
 import cv2
 import matplotlib.pyplot as plt
 
@@ -157,26 +157,6 @@ def evaluate(args, **options):
                 plt.savefig(path_rep + '/' + f_num + '.png', dpi=300, bbox_inches='tight')
                 pass
 
-        def getInliers(matches, H, epi=3, verbose=False):
-            """
-            input:
-                matches: numpy (n, 4(x1, y1, x2, y2))
-                H (ground truth homography): numpy (3, 3)
-            """
-            from evaluations.detector_evaluation import warp_keypoints
-            # warp points 
-            warped_points = warp_keypoints(matches[:, :2], H) # make sure the input fits the (x,y)
-
-            # compute point distance
-            norm = np.linalg.norm(warped_points - matches[:, 2:4],
-                                    ord=None, axis=1)
-            inliers = norm < epi
-            if verbose:
-                print("Total matches: ", inliers.shape[0], ", inliers: ", inliers.sum(),
-                                    ", percentage: ", inliers.sum() / inliers.shape[0])
-
-            return inliers
-
         if args.homography:
             # estimate result
             ##### check
@@ -185,7 +165,7 @@ def evaluate(args, **options):
             result = compute_homography(data, correctness_thresh=homography_thresh)
             correctness.append(result['correctness'])
             # est_H_mean_dist.append(result['mean_dist'])
-            # compute matching score
+            # Compute matching score
             def warpLabels(pnts, homography, H, W):
                 import torch
                 """
@@ -206,8 +186,23 @@ def evaluate(args, **options):
 
             from numpy.linalg import inv
             H, W, d = image.shape
+            # Matching score should be symmetrically computed and averaged
+            # TODO: Matching score definition should be more precisely seared.
+            warped_pnts = warpLabels(keypoints, real_H, H, W)
             unwarped_pnts = warpLabels(warped_keypoints, inv(real_H), H, W)
-            score = (result['inliers'].sum() * 2) / (keypoints.shape[0] + unwarped_pnts.shape[0])
+            # score = (result['inliers'].sum() * 2) / (keypoints.shape[0] + unwarped_pnts.shape[0])
+            matches = result['matches']
+            inliers = getInliers(matches, real_H, epi=3)
+            result['inliers_bf'] = inliers
+            # score = inliers.sum() / (keypoints.shape[0] + warped_keypoints.shape[0] - inliers.sum())
+            score = inliers.sum() / (keypoints.shape[0] + warped_pnts.shape[0] - inliers.sum())
+
+            inliers = getInliers(np.concatenate((matches[:,2:4], matches[:,:2]), axis=1), inv(real_H), epi=3)
+            result['inliers_bf'] += inliers
+            # score += inliers.sum() / (keypoints.shape[0] + warped_keypoints.shape[0] - inliers.sum())
+            score += inliers.sum() / (unwarped_pnts.shape[0] + warped_keypoints.shape[0] - inliers.sum())
+            score /= 2
+
             print("m. score: ", score)
             mscore.append(score)
             # compute map
@@ -312,18 +307,8 @@ def evaluate(args, **options):
                 #img1 = to3dim(img1)
                 #img2 = to3dim(img2)
                 H = output['homography']
-                warped_img1 = cv2.warpPerspective(img1, H, (img2.shape[1], img2.shape[0]))
-                # from numpy.linalg import inv
-                # warped_img1 = cv2.warpPerspective(img1, inv(H), (img2.shape[1], img2.shape[0]))
-                # img1 = np.concatenate([img1, img1, img1], axis=2)
-                # warped_img1 = np.stack([warped_img1, warped_img1, warped_img1], axis=2)
-                # img2 = np.concatenate([img2, img2, img2], axis=2)
-                plot_imgs([img1, img2, warped_img1], titles=['img1', 'img2', 'warped_img1'], dpi=200)
-                plt.tight_layout()
-                plt.savefig(path_warp + '/' + f_num + '.png')
 
                 ## plot filtered image
-                img1, img2 = data['image'], data['warped_image']
                 warped_img1 = cv2.warpPerspective(img1, H, (img2.shape[1], img2.shape[0]))
                 plot_imgs([img1, img2, warped_img1], titles=['img1', 'img2', 'warped_img1'], dpi=200)
                 plt.tight_layout()
@@ -354,7 +339,7 @@ def evaluate(args, **options):
                 from utils.draw import draw_matches
                 filename = path_match + '/' + f_num + 'm.png'
                 # ratio = 0.1
-                inliers = result['inliers']
+                inliers = result['inliers_bf']
 
                 matches_in = matches[inliers == True]
                 matches_out = matches[inliers == False]
@@ -373,11 +358,6 @@ def evaluate(args, **options):
                 # matches_temp, _ = get_random_m(matches_in, ratio)
                 draw_matches(image, warped_image, matches_in, lw=1.0, 
                         filename=filename, show=False, if_fig=False)
-
-
-
-
-
 
     if args.repeatibility:
         repeatability_ave = np.array(repeatability).mean()
