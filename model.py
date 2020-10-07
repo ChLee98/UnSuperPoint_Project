@@ -169,18 +169,18 @@ class UnSuperPoint(nn.Module):
         usp = 0; unixy = 0; desc = 0; decorr = 0
         bath = bath_As.shape[0]
         for i in range(bath):
-            # t1, t2, t3, t4 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
-            #                             bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
-            # usp += t1; unixy += t2; desc += t3; decorr += t4
-            t1, t2, t3 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
+            t1, t2, t3, t4 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
                                         bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
-            usp += t1; desc += t2; decorr += t3
-        # loss = usp + unixy + desc + decorr
-        loss = usp + desc + decorr
+            usp += t1; unixy += t2; desc += t3; decorr += t4
+            #t1, t2, t3 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
+            #                            bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
+            #usp += t1; desc += t2; decorr += t3
+        loss = usp + unixy + desc + decorr
+        #loss = usp + desc + decorr
         lossdict = {
             "loss": loss/bath,
             "usp_loss": usp/bath,
-            #"uni_xy_loss": unixy/bath,
+            "uni_xy_loss": unixy/bath,
             "descriptor_loss": desc/bath,
             "decorrelation_loss": decorr/bath
         }
@@ -198,10 +198,10 @@ class UnSuperPoint(nn.Module):
         
         Descloss = self.descloss(Ad, Bd, G)
         Decorrloss = self.decorrloss(Ad, Bd)
-        # return self.usp * Usploss, self.uni_xy * Uni_xyloss,\
-        #     self.desc * Descloss, self.decorr * Decorrloss
-        return self.usp * Usploss,\
+        return self.usp * Usploss, self.uni_xy * Uni_xyloss,\
             self.desc * Descloss, self.decorr * Decorrloss
+        #return self.usp * Usploss,\
+        #    self.desc * Descloss, self.decorr * Decorrloss
 
     def usploss(self, As, Bs, mat, G):
         reshape_As_k, reshape_Bs_k, d_k = self.get_point_pair(
@@ -297,12 +297,13 @@ class UnSuperPoint(nn.Module):
         for i in range(2):
             loss += self.get_uni_xy(reshape_PA[:,i])
             loss += self.get_uni_xy(reshape_PB[:,i])
-        return loss/4
+        return loss
         
     def get_uni_xy(self, position):
-        i = torch.argsort(position).to(torch.float32)
+        pos, _ = torch.sort(position)
         M = len(position)
-        return torch.mean(torch.pow(position - i / (M-1),2))
+        i = torch.arange(0., M, requires_grad=False).to(self.dev)
+        return torch.mean(torch.pow(pos - i / (M-1),2))
 
     def descloss(self, DA, DB, G):
         c, h, w = DA.shape
