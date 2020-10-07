@@ -7,7 +7,15 @@ python main.py train <CONFIGURATION> <EXPORTNAME>
 
 ## How to test
 ```
-python main.py test <CONFIGURATION> <EXPORTNAME> <MODELNAME>
+python main.py export <CONFIGURATION> <EXPORTNAME> <MODELNAME>
+python evaluation.py <EXPORTPATH>
+```
+
+## Example command
+```
+python main.py train config/train.yaml unsuperpoint
+python main.py export config/test.yaml unsuperpoint UnsuperPoint_single_8000.pkl
+python evaluation.py logs/unsuperpoint/predictions --repeatibility --outputImg --homography --plotMatching
 ```
 
 ## Tensorboard
