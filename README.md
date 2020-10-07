@@ -27,9 +27,10 @@ tensorboard --logdir=./runs/ [--host | static_ip_address] [--port | 6008]
  - [x] Tensorboard writer should be used for easy debug
  - [ ] Batch training should be more efficiently mangaed
  - [x] Evaluation/Test code should be implemented
- - [ ] Evaluation code should use ground truth homography
+ - [x] Evaluation code should use ground truth homography
  - [ ] Optimizer should be changed to Adam
+ - [x] Unixy loss was debugged
  
-## Acknowledgments：
+## Acknowledgments
  - Based on a paper which is not yet published, UnSuperPoint: <https://arxiv.org/abs/1907.04011v1>
  - Based on code: <https://github.com/lydproject/UnSuperPoint_Project>
