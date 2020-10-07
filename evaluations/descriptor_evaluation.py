@@ -57,7 +57,7 @@ def keep_shared_points(keypoint_map, H, keep_k_points=300):
 
     return keypoints.astype(int)
 
-def compute_homography(data, keep_k_points=300 correctness_thresh=3, orb=False, shape=(240,320)):
+def compute_homography(data, keep_k_points=300, correctness_thresh=3, orb=False, shape=(240,320)):
     """
     Compute the homography between 2 sets of detections and descriptors inside data.
     """
