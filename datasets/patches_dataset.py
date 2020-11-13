@@ -64,7 +64,7 @@ class PatchesDataset(Dataset):
             if image.ndim == 2:
                 image = image[:,:, np.newaxis]
             
-            image = Image.fromarray(image)
+            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             if self.transform is not None:
                 image = self.transform(image)
             return image

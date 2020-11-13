@@ -1,3 +1,5 @@
 datasets/COCO
 datasets/HPatches
 runs
+logs/*
+*__pycache__

@@ -9,6 +9,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from settings import DEFAULT_SETTING
+from utils.utils import warp_points, normPts, denormPts
 
 # TEMP
 import torchvision.transforms as transforms
@@ -135,6 +136,7 @@ class UnSuperPoint(nn.Module):
         self.writer.add_figure('{}/{}'.format(task, name), f, self.step)
 
     def train_val_step(self, img0, img1, mat, task='train'):
+        self.task = task
         img0 = img0.to(self.dev)
         img1 = img1.to(self.dev)
         mat = mat.squeeze()
@@ -193,6 +195,7 @@ class UnSuperPoint(nn.Module):
         # position_B = self.get_batch_position(Bp, flag='B', mat=None)
         G = self.getG(position_A,position_B)
 
+        # print(torch.sum((position_A < 0) + (position_A > 320)))
         Usploss = self.usploss(As, Bs, mat, G)
         Uni_xyloss = self.uni_xyloss(Ap, Bp)
         
@@ -250,12 +253,22 @@ class UnSuperPoint(nn.Module):
             res[y,i,:] = (i + Pmap[y,i,:]) * self.downsample 
         if flag == 'A':
             # print(mat.shape)
-            r = torch.zeros_like(res)
-            Denominator = res[x,:,:]*mat[2,0] + res[y,:,:]*mat[2,1] +mat[2,2]
-            r[x,:,:] = (res[x,:,:]*mat[0,0] + 
-                res[y,:,:]*mat[0,1] +mat[0,2]) / Denominator 
-            r[y,:,:] = (res[x,:,:]*mat[1,0] + 
-                res[y,:,:]*mat[1,1] +mat[1,2]) / Denominator
+            if self.task == 'train':
+                shape = torch.tensor([Pmap.shape[2], Pmap.shape[1]]).to(self.dev) * self.downsample
+                Hc, Wc = Pmap.shape[1:]
+                res = normPts(res.permute(1, 2, 0).reshape((-1, 2)), shape)
+                # r = torch.stack((res[:,1], res[:,0]), dim=1) # (y, x) to (x, y)
+                r = warp_points(res, mat, self.dev).squeeze(0)
+                # r = torch.stack((r[:,1], r[:,0]), dim=1)  # (x, y) to (y, x)
+                r = denormPts(r, shape).reshape(Hc, Wc, 2).permute(2, 0, 1)
+                
+            else:
+                r = torch.zeros_like(res)
+                Denominator = res[x,:,:]*mat[2,0] + res[y,:,:]*mat[2,1] +mat[2,2]
+                r[x,:,:] = (res[x,:,:]*mat[0,0] + 
+                    res[y,:,:]*mat[0,1] +mat[0,2]) / Denominator 
+                r[y,:,:] = (res[x,:,:]*mat[1,0] + 
+                    res[y,:,:]*mat[1,1] +mat[1,2]) / Denominator
             return r
         else:
             return res
@@ -334,7 +347,8 @@ class UnSuperPoint(nn.Module):
         V_v_2 = torch.sum(torch.pow(V_v, 2), dim=1, keepdim=True)
         denominator = torch.sqrt(torch.matmul(V_v_2, V_v_2.transpose(1,0)))
         one = torch.eye(F).to(self.dev)
-        return torch.sum(molecular / denominator - one) / (F * (F-1))
+        #return torch.sum(molecular / denominator - one) / (F * (F-1))
+        return torch.sum(torch.square((molecular / denominator - one) / (F * (F-1))))
 
     def getPtsDescFromHeatmap(self, point, heatmap, desc):
         '''

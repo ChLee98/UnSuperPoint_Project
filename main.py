@@ -54,7 +54,8 @@ def simple_train(config, output_dir, args):
         exper_name=args.export_name, date=True))
 
     # Prepare for optimizer
-    model.optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
+    # model.optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
+    model.optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
     whole_step = 0
     total = len(trainloader)
     try:
@@ -127,6 +128,7 @@ def simple_export(config, output_dir, args):
     val_agent.load_state_dict(torch.load(model_path))
     val_agent.to(val_agent.dev)
     val_agent.train(False)
+    val_agent.task = 'test'
 
     ## tracker
     tracker = PointTracker(max_length=2, nn_thresh=val_agent.nn_thresh)

@@ -28,7 +28,7 @@ tensorboard --logdir=./runs/ [--host | static_ip_address] [--port | 6008]
  - [ ] Batch training should be more efficiently mangaed
  - [x] Evaluation/Test code should be implemented
  - [x] Evaluation code should use ground truth homography
- - [ ] Optimizer should be changed to Adam
+ - [X] Optimizer should be changed to Adam
  - [x] Unixy loss was debugged
  
 ## Acknowledgments
