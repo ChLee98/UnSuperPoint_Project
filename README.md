@@ -25,9 +25,10 @@ tensorboard --logdir=./runs/ [--host | static_ip_address] [--port | 6008]
 
 ## TODO
  - [x] Tensorboard writer should be used for easy debug
- - [ ] Batch training should be more efficiently mangaed
- - [x] Evaluation/Test code should be implemented
- - [x] Evaluation code should use ground truth homography
+ - [x] Batch training should be more efficiently mangaed
+ - [ ] Evaluation code should be implemented
+ - [x] Test code should be implemented
+ - [x] Test code should use ground truth homography
  - [X] Optimizer should be changed to Adam
  - [x] Unixy loss was debugged
  

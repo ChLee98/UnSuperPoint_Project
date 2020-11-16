@@ -74,7 +74,7 @@ def dataLoader(config, dataset='Coco', warp_input=False, train=True, val=True):
         worker_init_fn=worker_init_fn
     )
     val_set = Dataset(
-        transform=data_transforms['train'],
+        transform=data_transforms['val'],
         task = 'val',
         **config['data'],
     )

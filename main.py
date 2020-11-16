@@ -72,8 +72,10 @@ def simple_train(config, output_dir, args):
                     torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
                 
                 if args.eval and whole_step % config['validation_interval'] == 0:
-                    # TODO: Validation code should be implemented
-                    pass
+                    for j, (img0, img1, mat) in enumerate(valloader):
+                        model.train_val_step(img0, img1, mat, 'valid')
+                        if j > config['training'].get("step_val", 4):
+                            break
 
         torch.save(model.state_dict(), os.path.join(savepath, config['model']['name'] + '_{}.pkl'.format(whole_step)))
 
@@ -148,9 +150,9 @@ def simple_export(config, output_dir, args):
             desc: list [numpy (256, N)]
             """
             score, point, desc = val_agent.forward(img.to(device)) # heatmap: numpy [batch, 1, H, W]
-            point = val_agent.get_position(point[0])
+            point = val_agent.get_position(point)
             # heatmap, pts to pts, desc
-            pts, desc = val_agent.getPtsDescFromHeatmap(point.cpu().numpy(), score[0].cpu().numpy(), desc[0].cpu().numpy())
+            pts, desc = val_agent.getPtsDescFromHeatmap(point[0].cpu().numpy(), score[0].cpu().numpy(), desc[0].cpu().numpy())
 
             outs = {"pts": pts, "desc": desc}
             return outs

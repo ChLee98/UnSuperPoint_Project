@@ -14,10 +14,7 @@ from utils.utils import sample_homography_np as sample_homography, inv_warp_imag
 from settings import COCO_TRAIN, COCO_VAL, DATA_PATH
 
 class Coco(Dataset):
-    default_config = {
-
-
-    }
+    default_config = {}
     def __init__(self, transform=None, task='train', **config):
         self.task = task
         self.config = self.default_config
@@ -53,6 +50,9 @@ class Coco(Dataset):
         inv_mat = torch.inverse(mat)
         des_img = inv_warp_image(des_img, inv_mat).squeeze(0)
 
+        if torch.isnan(des_img).any():
+            print("NAN is corrected")
+            des_img[torch.isnan(des_img)] = 0.
         # H, W = self.config['resize']
         # norm = torch.tensor([[2/W, 0, -1], [0, 2/H, -1], [0, 0, 1]], dtype=torch.float32)
         # denorm = torch.tensor([[W, 0, W], [0, H, H], [0, 0, 2]], dtype=torch.float32)

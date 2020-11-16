@@ -9,7 +9,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from settings import DEFAULT_SETTING
-from utils.utils import warp_points, normPts, denormPts
+from utils.utils import batch_warp_points, normPts, denormPts
 
 # TEMP
 import torchvision.transforms as transforms
@@ -137,85 +137,127 @@ class UnSuperPoint(nn.Module):
 
     def train_val_step(self, img0, img1, mat, task='train'):
         self.task = task
+        #with torch.autograd.detect_anomaly():
         img0 = img0.to(self.dev)
         img1 = img1.to(self.dev)
         mat = mat.squeeze()
         mat = mat.to(self.dev)
         self.optimizer.zero_grad()
-        s1,p1,d1 = self.forward(img0)
-        s2,p2,d2 = self.forward(img1)
-        # TODO: All code does not consider batch_size larger than 1
-        s1 = torch.squeeze(s1, 0); s2 = torch.squeeze(s2, 0)
-        p1 = torch.squeeze(p1, 0); p2 = torch.squeeze(p2, 0)
-        d1 = torch.squeeze(d1, 0); d2 = torch.squeeze(d2, 0)
-        # print(s1.shape,s2.shape,p1.shape,p2.shape,d1.shape,d2.shape,mat.shape)
-        # loss = model.UnSuperPointLoss(s1,p1,d1,s2,p2,d2,mat)
+        
+        if task == 'train':
+            s1,p1,d1 = self.forward(img0)
+            s2,p2,d2 = self.forward(img1)
+
+        else:
+            with torch.no_grad():
+                s1,p1,d1 = self.forward(img0)
+                s2,p2,d2 = self.forward(img1)
+
         lossdict = self.loss(s1,p1,d1,s2,p2,d2,mat)
         self.tb_add_loss(lossdict, task)
 
         if task == 'train' and self.step % self.config['tensorboard_interval'] == 0:
-            self.tb_add_hist('left/x_relative', p1[0])
-            self.tb_add_hist('left/y_relative', p1[1])
-            self.tb_add_hist('left/score', s1)
-            self.tb_add_hist('right/x_relative', p2[0])
-            self.tb_add_hist('right/y_relative', p2[1])
-            self.tb_add_hist('right/score', s2)
+            self.tb_add_hist('train/left/x_relative', p1[0])
+            self.tb_add_hist('train/left/y_relative', p1[1])
+            self.tb_add_hist('train/left/score', s1)
+            self.tb_add_hist('train/right/x_relative', p2[0])
+            self.tb_add_hist('train/right/y_relative', p2[1])
+            self.tb_add_hist('train/right/score', s2)
 
-        lossdict['loss'].backward()
-        self.optimizer.step()
+        if task == 'valid':
+            self.tb_add_hist('valid/left/x_relative', p1[0])
+            self.tb_add_hist('valid/left/y_relative', p1[1])
+            self.tb_add_hist('valid/left/score', s1)
+            self.tb_add_hist('valid/right/x_relative', p2[0])
+            self.tb_add_hist('valid/right/y_relative', p2[1])
+            self.tb_add_hist('valid/right/score', s2)
+            # TODO: Validation operations
+
+        if task == 'train':
+            lossdict['loss'].backward()
+            self.optimizer.step()
 
         return lossdict['loss'].item()
 
     def loss(self, bath_As, bath_Ap, bath_Ad, 
         bath_Bs, bath_Bp, bath_Bd, mat):
         usp = 0; unixy = 0; desc = 0; decorr = 0
-        bath = bath_As.shape[0]
-        for i in range(bath):
-            t1, t2, t3, t4 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
-                                        bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
-            usp += t1; unixy += t2; desc += t3; decorr += t4
-            #t1, t2, t3 = self.UnSuperPointLoss(bath_As[i], bath_Ap[i], bath_Ad[i], 
-            #                            bath_Bs[i], bath_Bp[i], bath_Bd[i],mat[i])
-            #usp += t1; desc += t2; decorr += t3
+        usp, unixy, desc, decorr = self.UnSuperPointLoss(bath_As, bath_Ap, bath_Ad, bath_Bs, bath_Bp, bath_Bd, mat)
+
         loss = usp + unixy + desc + decorr
-        #loss = usp + desc + decorr
         lossdict = {
-            "loss": loss/bath,
-            "usp_loss": usp/bath,
-            "uni_xy_loss": unixy/bath,
-            "descriptor_loss": desc/bath,
-            "decorrelation_loss": decorr/bath
+            "loss": loss,
+            "usp_loss": usp,
+            "uni_xy_loss": unixy,
+            "descriptor_loss": desc,
+            "decorrelation_loss": decorr
         }
+        
         return lossdict
 
     def UnSuperPointLoss(self, As, Ap, Ad, Bs, Bp, Bd, mat):
-        position_A = self.get_position(Ap, flag='A', mat=mat)
-        position_B = self.get_position(Bp, flag='B', mat=None)
-        # position_A = self.get_batch_position(Ap, flag='A', mat=mat)
-        # position_B = self.get_batch_position(Bp, flag='B', mat=None)
-        G = self.getG(position_A,position_B)
+        position_A = self.get_position(Ap, mat=mat)
+        position_B = self.get_position(Bp)
+        G = self.getG(position_A, position_B)
 
-        # print(torch.sum((position_A < 0) + (position_A > 320)))
         Usploss = self.usploss(As, Bs, mat, G)
         Uni_xyloss = self.uni_xyloss(Ap, Bp)
-        
+
         Descloss = self.descloss(Ad, Bd, G)
         Decorrloss = self.decorrloss(Ad, Bd)
         return self.usp * Usploss, self.uni_xy * Uni_xyloss,\
             self.desc * Descloss, self.decorr * Decorrloss
-        #return self.usp * Usploss,\
-        #    self.desc * Descloss, self.decorr * Decorrloss
+
+    def get_position(self, Pmap, mat=None):
+        x = 0
+        y = 1
+        res = torch.zeros_like(Pmap)
+        # print(Pmap.shape,res.shape)
+        for i in range(Pmap.shape[3]):
+            res[:,x,:,i] = (i + Pmap[:,x,:,i]) * self.downsample
+        for i in range(Pmap.shape[2]):
+            res[:,y,i,:] = (i + Pmap[:,y,i,:]) * self.downsample 
+        if mat is not None:
+            # print(mat.shape)
+            if self.task == 'train':
+                shape = torch.tensor([Pmap.shape[3], Pmap.shape[2]]).to(self.dev) * self.downsample
+                B = Pmap.shape[0]
+                Hc, Wc = Pmap.shape[2:]
+                res = normPts(res.permute(0, 2, 3, 1).reshape((B, -1, 2)), shape)
+                # r = torch.stack((res[:,1], res[:,0]), dim=1) # (y, x) to (x, y)
+                r = batch_warp_points(res, mat, self.dev)
+                # r = torch.stack((r[:,1], r[:,0]), dim=1)  # (x, y) to (y, x)
+                r = denormPts(r, shape).reshape(B, Hc, Wc, 2).permute(0, 3, 1, 2)
+            else:
+                r = torch.zeros_like(res)
+                Denominator = res[:,x,:,:]*(mat[:,2,0].reshape(-1, 1, 1)) + res[:,y,:,:]*(mat[:,2,1].reshape(-1, 1, 1)) +(mat[:,2,2].reshape(-1, 1, 1))
+                r[:,x,:,:] = (res[:,x,:,:]*(mat[:,0,0].reshape(-1, 1, 1)) + 
+                    res[:,y,:,:]*(mat[:,0,1].reshape(-1, 1, 1)) + (mat[:,0,2].reshape(-1, 1, 1))) / (Denominator + 1e-8)
+                r[:,y,:,:] = (res[:,x,:,:]*(mat[:,1,0].reshape(-1, 1, 1)) + 
+                    res[:,y,:,:]*(mat[:,1,1].reshape(-1, 1, 1)) +(mat[:,1,2].reshape(-1, 1, 1))) / (Denominator + 1e-8)
+            return r
+        else:
+            return res
 
     def usploss(self, As, Bs, mat, G):
-        reshape_As_k, reshape_Bs_k, d_k = self.get_point_pair(
-            G, As, Bs)
-        # print(d_k)
+        A2BId, Id = self.get_point_pair(G, As, Bs)
+        # print(A2BId.shape, Id.shape)
         # print(reshape_As_k.shape,reshape_Bs_k.shape,d_k.shape)
-        positionK_loss = torch.mean(d_k)
-        scoreK_loss = torch.mean(torch.pow(reshape_As_k - reshape_Bs_k, 2))
-        uspK_loss = self.get_uspK_loss(d_k, reshape_As_k, reshape_Bs_k)        
+        B = G.shape[0]
+        reshape_As = As.reshape(B, -1)
+        reshape_Bs = Bs.reshape(B, -1)
+        positionK_loss = scoreK_loss = uspK_loss = 0
+
+        for i in range(B):
+            d_k = G[i][Id[i], A2BId[i][Id[i]]]
+            reshape_As_k = reshape_As[i][Id[i]]
+            reshape_Bs_k = reshape_Bs[i][A2BId[i][Id[i]]]
+            positionK_loss += torch.mean(d_k)
+            scoreK_loss += torch.mean(torch.pow(reshape_As_k - reshape_Bs_k, 2))
+            uspK_loss += self.get_uspK_loss(d_k, reshape_As_k, reshape_Bs_k)
+
         return (self.position_weight * positionK_loss + 
-            self.score_weight * scoreK_loss + uspK_loss)
+            self.score_weight * scoreK_loss + uspK_loss)/B
 
     def get_bath_position(self, Pamp):
         x = 0
@@ -242,60 +284,29 @@ class UnSuperPoint(nn.Module):
             return r
         return res
 
-    def get_position(self, Pmap, flag=None, mat=None):
-        x = 0
-        y = 1
-        res = torch.zeros_like(Pmap)
-        # print(Pmap.shape,res.shape)
-        for i in range(Pmap.shape[2]):
-            res[x,:,i] = (i + Pmap[x,:,i]) * self.downsample
-        for i in range(Pmap.shape[1]):
-            res[y,i,:] = (i + Pmap[y,i,:]) * self.downsample 
-        if flag == 'A':
-            # print(mat.shape)
-            if self.task == 'train':
-                shape = torch.tensor([Pmap.shape[2], Pmap.shape[1]]).to(self.dev) * self.downsample
-                Hc, Wc = Pmap.shape[1:]
-                res = normPts(res.permute(1, 2, 0).reshape((-1, 2)), shape)
-                # r = torch.stack((res[:,1], res[:,0]), dim=1) # (y, x) to (x, y)
-                r = warp_points(res, mat, self.dev).squeeze(0)
-                # r = torch.stack((r[:,1], r[:,0]), dim=1)  # (x, y) to (y, x)
-                r = denormPts(r, shape).reshape(Hc, Wc, 2).permute(2, 0, 1)
-                
-            else:
-                r = torch.zeros_like(res)
-                Denominator = res[x,:,:]*mat[2,0] + res[y,:,:]*mat[2,1] +mat[2,2]
-                r[x,:,:] = (res[x,:,:]*mat[0,0] + 
-                    res[y,:,:]*mat[0,1] +mat[0,2]) / Denominator 
-                r[y,:,:] = (res[x,:,:]*mat[1,0] + 
-                    res[y,:,:]*mat[1,1] +mat[1,2]) / Denominator
-            return r
-        else:
-            return res
-
     def getG(self, PA, PB):
-        c = PA.shape[0]
-        # reshape_PA shape = m,c
-        reshape_PA = PA.reshape((c,-1)).permute(1,0)
-        # reshape_PB shape = m,c
-        reshape_PB = PB.reshape((c,-1)).permute(1,0)
-        # x shape m,m <- (m,1 - 1,m) 
-        x = torch.unsqueeze(reshape_PA[:,0],1) - torch.unsqueeze(reshape_PB[:,0],0)
-        # y shape m,m <- (m,1 - 1,m)
-        y = torch.unsqueeze(reshape_PA[:,1],1) - torch.unsqueeze(reshape_PB[:,1],0)
+        b, c = PA.shape[0:2]
+        # reshape_PA shape = b, 2, m -> b, m, 2
+        reshape_PA = PA.reshape((b, c, -1)).permute(0, 2, 1)
+        # reshape_PB shape = b, 2, m -> b, m, 2
+        reshape_PB = PB.reshape((b, c, -1)).permute(0, 2, 1)
+        # x shape b,m,m <- b, (m,1 - 1,m) 
+        x = torch.unsqueeze(reshape_PA[:,:,0],2) - torch.unsqueeze(reshape_PB[:,:,0],1)
+        # y shape b,m,m <- b, (m,1 - 1,m)
+        y = torch.unsqueeze(reshape_PA[:,:,1],2) - torch.unsqueeze(reshape_PB[:,:,1],1)
 
         G = torch.sqrt(torch.pow(x,2) + torch.pow(y,2))
 
         return G
 
     def get_point_pair(self, G, As, Bs):
-        A2B_min_Id = torch.argmin(G,dim=1)
-        M = len(A2B_min_Id)
-        Id = G[list(range(M)),A2B_min_Id] <= self.correspond
-        reshape_As = As.reshape(-1)
-        reshape_Bs = Bs.reshape(-1)
-        return (reshape_As[Id], reshape_Bs[A2B_min_Id[Id]], 
-            G[Id,A2B_min_Id[Id]])
+        A2B_min_Id = torch.argmin(G, dim=2)
+        B, M = A2B_min_Id.shape[0:2]
+        Id = torch.nn.functional.grid_sample(G.unsqueeze(1), 
+            torch.stack([torch.arange(M).reshape(1, M).repeat(B, 1).to(self.dev), A2B_min_Id],
+                dim=2).unsqueeze(2).float())
+        Id = Id.squeeze() <= self.correspond
+        return A2B_min_Id, Id
 
     def get_uspK_loss(self, d_k, reshape_As_k, reshape_Bs_k):
         sk_ = (reshape_As_k + reshape_Bs_k) / 2
@@ -303,52 +314,57 @@ class UnSuperPoint(nn.Module):
         return torch.mean(sk_ * (d_k - d_))
 
     def uni_xyloss(self, Ap, Bp):
-        c = Ap.shape[0]
-        reshape_PA = Ap.reshape((c,-1)).permute(1,0)
-        reshape_PB = Bp.reshape((c,-1)).permute(1,0)
+        b, c = Ap.shape[0:2]
+        reshape_PA = Ap.reshape((b,c,-1)).transpose(2,1)
+        reshape_PB = Bp.reshape((b,c,-1)).transpose(2,1)
         loss = 0
         for i in range(2):
-            loss += self.get_uni_xy(reshape_PA[:,i])
-            loss += self.get_uni_xy(reshape_PB[:,i])
+            loss += self.get_uni_xy(reshape_PA[:,:,i], b)
+            loss += self.get_uni_xy(reshape_PB[:,:,i], b)
         return loss
         
-    def get_uni_xy(self, position):
+    def get_uni_xy(self, position, batch):
         pos, _ = torch.sort(position)
-        M = len(position)
+        M = position.shape[1]
         i = torch.arange(0., M, requires_grad=False).to(self.dev)
-        return torch.mean(torch.pow(pos - i / (M-1),2))
+        return torch.mean(torch.pow(pos - i.unsqueeze(0) / (M-1),2))
 
     def descloss(self, DA, DB, G):
-        c, h, w = DA.shape
+        b, c, h, w = DA.shape
         C = G <= 8
         C_ = G > 8
         # reshape_DA size = M, 256; reshape_DB size = 256, M
-        AB = torch.matmul(DA.reshape((c,-1)).permute(1,0), DB.reshape((c,-1)))
+        AB = torch.bmm(DA.reshape((b, c,-1)).transpose(2,1), DB.reshape((b, c,-1)))
         AB[C] = self.d * (self.m_p - AB[C])
         AB[C_] -= self.m_n
         return torch.mean(torch.clamp(AB, min=0))
 
     def decorrloss(self, DA, DB):
-        c, h, w = DA.shape
+        b, c, h, w = DA.shape
         # reshape_DA size = 256, M
-        reshape_DA = DA.reshape((c,-1))
+        reshape_DA = DA.reshape((b,c,-1))
         # reshape_DB size = 256, M
-        reshape_DB = DB.reshape((c,-1))
+        reshape_DB = DB.reshape((b,c,-1))
         loss = 0
         loss += self.get_R_b(reshape_DA)
         loss += self.get_R_b(reshape_DB)
         return loss
     
     def get_R_b(self, reshape_D):
-        F = reshape_D.shape[0]
-        v_ = torch.mean(reshape_D, dim = 1, keepdim=True)
+        B, F = reshape_D.shape[0:2]
+        v_ = torch.mean(reshape_D, dim = 2, keepdim=True)
         V_v = reshape_D - v_
-        molecular = torch.matmul(V_v, V_v.transpose(1,0))
-        V_v_2 = torch.sum(torch.pow(V_v, 2), dim=1, keepdim=True)
-        denominator = torch.sqrt(torch.matmul(V_v_2, V_v_2.transpose(1,0)))
-        one = torch.eye(F).to(self.dev)
-        #return torch.sum(molecular / denominator - one) / (F * (F-1))
-        return torch.sum(torch.square((molecular / denominator - one) / (F * (F-1))))
+        molecular = torch.matmul(V_v, V_v.transpose(2,1))
+        V_v_2 = torch.sum(torch.pow(V_v, 2), dim=2, keepdim=True)
+        denominator = torch.sqrt(torch.matmul(V_v_2, V_v_2.transpose(2,1)))
+        one = torch.eye(F).to(self.dev).unsqueeze(0)
+        if torch.isnan(molecular).any() or torch.isnan(denominator).any():
+            print("NAN DETECTED previous!!!")
+            print("B, F : ", B, F)
+        rb = torch.sum(torch.square((molecular / (denominator + 1e-8) - one) / (B * F * (F-1))))
+        if torch.isnan(rb).any():
+            print("NAN DETECTED rb!!")
+        return rb
 
     def getPtsDescFromHeatmap(self, point, heatmap, desc):
         '''

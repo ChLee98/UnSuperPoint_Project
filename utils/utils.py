@@ -267,3 +267,31 @@ def warp_points(points, homographies, device='cpu'):
     warped_points = warped_points.transpose(2, 1)
     warped_points = warped_points[:, :, :2] / warped_points[:, :, 2:]
     return warped_points[0,:,:] if no_batches else warped_points
+
+def batch_warp_points(points, homographies, device='cpu'):
+    """
+    Warp a list of points with the given homography.
+
+    Arguments:
+        points: list of N pointsof each batch, shape (B, N, 2(x, y))).
+        homography: batched (shapes (B, 3, 3)).
+
+    Returns: a Tensor of shape (B, N, 2(x, y))
+            containing the new coordinates of the warped points.
+
+    """
+    # homographies = homographies.unsqueeze(0) if len(homographies.shape) == 2 else homographies
+    batch_size = homographies.shape[0]
+    points = torch.cat((points.float(), torch.ones((points.shape[0], points.shape[1], 1)).to(device)), dim=2)
+    points = points.to(device)
+    # homographies = homographies.view(batch_size, 3,3)
+    # warped_points = homographies*points
+    # points = points.double()
+    # warped_points = homographies@points.permute(0, 2, 1) # torch.bmm
+    warped_points = torch.bmm(homographies, points.transpose(2, 1))
+    # warped_points = np.tensordot(homographies, points.transpose(), axes=([2], [0]))
+    # normalize the points
+    warped_points = warped_points.view([batch_size, 3, -1])
+    warped_points = warped_points.transpose(2, 1)
+    warped_points = warped_points[:, :, :2] / warped_points[:, :, 2:]
+    return warped_points
