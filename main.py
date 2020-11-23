@@ -16,7 +16,7 @@ from settings import *
 
 from model_wrap import PointTracker
 
-from utils.loader import dataLoader, testLoader
+from utils.loader import dataLoader, testLoader, renderLoader
 from utils.utils import getWriterPath
 from model import UnSuperPoint
 
@@ -209,26 +209,37 @@ def simple_export(config, output_dir, args):
         count += 1
     print("output pairs: ", count)
 
-@torch.no_grad()
-def simple_test(config, output_dir, args):
-    model_path = os.path.join(output_dir, 'checkpoints', args.model_name)
-    savepath = os.path.join(output_dir, 'results')
+def simple_render(config, output_dir, args):
+    from utils.tools import squeezeToNumpy
+    import matplotlib.pyplot as plt
+    from utils.draw import plot_imgs
+    from utils.loader import get_save_path
+
+    savepath = get_save_path(output_dir)
+    savepath = savepath / "../rendered"
     os.makedirs(savepath, exist_ok=True)
 
     # Prepare for data loader
-    data = testLoader(config, dataset=config['data']['dataset'], warp_input=True)
-    testloader = data['test_loader']
-    
-    # Prepare for model
-    model = UnSuperPoint()
-    model.load_state_dict(torch.load(model_path))
-    model.to(model.dev)
-    model.train(False)
+    renderloader = renderLoader(config, dataset=config['data']['dataset'], warp_input=True)
 
-    # Do prediction
-    # TODO: Make predictions done for all images in HPatches dataset.
-    model.predict(os.path.join(config['data']['root'], HPatches_SRC),\
-                os.path.join(config['data']['root'], HPatches_DST), savepath)
+    steps = config['rendering']['steps']
+
+    # Denormalization & Save
+    whole_step = 0
+    for batch_idx, (img0, img1, mat) in tqdm(enumerate(renderloader), desc='step', total=steps):
+        whole_step += 1
+
+        img_0 = 255*squeezeToNumpy(img0)[[2,1,0],:,:].transpose((1, 2, 0))
+        img_1 = 255*squeezeToNumpy(img1)[[2,1,0],:,:].transpose((1, 2, 0))
+
+        plot_imgs([img_0.astype(np.uint8), img_1.astype(np.uint8)], titles=['img1', 'img2'], dpi=200)
+        plt.title(str(batch_idx))
+        plt.tight_layout()
+        
+        plt.savefig(savepath / (str(batch_idx) + '.png'), dpi=300, bbox_inches='tight')
+        
+        if whole_step >= steps:
+            break
 
 if __name__ == '__main__':
     # add parser
@@ -256,11 +267,10 @@ if __name__ == '__main__':
     p_export.set_defaults(func=simple_export)
 
     # Testing command
-    p_test = subparsers.add_parser('test')
+    p_test = subparsers.add_parser('datarender')
     p_test.add_argument('config', type=str)
     p_test.add_argument('export_name', type=str)
-    p_test.add_argument('model_name', type=str)
-    p_test.set_defaults(func=simple_test)
+    p_test.set_defaults(func=simple_render)
     
     args = parser.parse_args()
 

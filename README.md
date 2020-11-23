@@ -11,6 +11,11 @@ python main.py export <CONFIGURATION> <EXPORTNAME> <MODELNAME>
 python evaluation.py <EXPORTPATH>
 ```
 
+## Training data check
+```
+python main.py datarender <CONFIGURATION> <EXPORTNAME>
+```
+
 ## Example command
 ```
 python main.py train config/train.yaml unsuperpoint

@@ -39,6 +39,32 @@ def worker_init_fn(worker_id):
    # print(worker_id, base_seed)
    np.random.seed(base_seed + worker_id)
 
+def renderLoader(config, dataset='Coco', warp_input=False):
+    import torchvision.transforms as transforms
+    rendering_params = config.get('rendering', {})
+    workers = rendering_params.get('workers', 1) # 16
+
+    Dataset = get_module('datasets', dataset)
+    print(f"dataset: {dataset}")
+
+    data_transforms = transforms.Compose([
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, hue=0.2),
+        transforms.ToTensor()
+    ])
+
+    render_set = Dataset(
+        transform=data_transforms,
+        task = 'train',
+        **config['data'],
+    )
+    render_loader = torch.utils.data.DataLoader(
+        render_set, batch_size=1, shuffle=True,
+        pin_memory=True,
+        num_workers=workers,
+        worker_init_fn=worker_init_fn
+    )
+    
+    return render_loader
 
 def dataLoader(config, dataset='Coco', warp_input=False, train=True, val=True):
     import torchvision.transforms as transforms

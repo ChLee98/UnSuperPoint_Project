@@ -184,6 +184,17 @@ class UnSuperPoint(nn.Module):
         usp = 0; unixy = 0; desc = 0; decorr = 0
         usp, unixy, desc, decorr = self.UnSuperPointLoss(bath_As, bath_Ap, bath_Ad, bath_Bs, bath_Bp, bath_Bd, mat)
 
+        if torch.isnan(usp).any():
+            loss = unixy + desc + decorr
+            lossdict = {
+                "loss": loss,
+                "uni_xy_loss": unixy,
+                "descriptor_loss": desc,
+                "decorrelation_loss": decorr
+            }
+            
+            return lossdict
+
         loss = usp + unixy + desc + decorr
         lossdict = {
             "loss": loss,
@@ -219,22 +230,14 @@ class UnSuperPoint(nn.Module):
             res[:,y,i,:] = (i + Pmap[:,y,i,:]) * self.downsample 
         if mat is not None:
             # print(mat.shape)
-            if self.task == 'train':
-                shape = torch.tensor([Pmap.shape[3], Pmap.shape[2]]).to(self.dev) * self.downsample
-                B = Pmap.shape[0]
-                Hc, Wc = Pmap.shape[2:]
-                res = normPts(res.permute(0, 2, 3, 1).reshape((B, -1, 2)), shape)
-                # r = torch.stack((res[:,1], res[:,0]), dim=1) # (y, x) to (x, y)
-                r = batch_warp_points(res, mat, self.dev)
-                # r = torch.stack((r[:,1], r[:,0]), dim=1)  # (x, y) to (y, x)
-                r = denormPts(r, shape).reshape(B, Hc, Wc, 2).permute(0, 3, 1, 2)
-            else:
-                r = torch.zeros_like(res)
-                Denominator = res[:,x,:,:]*(mat[:,2,0].reshape(-1, 1, 1)) + res[:,y,:,:]*(mat[:,2,1].reshape(-1, 1, 1)) +(mat[:,2,2].reshape(-1, 1, 1))
-                r[:,x,:,:] = (res[:,x,:,:]*(mat[:,0,0].reshape(-1, 1, 1)) + 
-                    res[:,y,:,:]*(mat[:,0,1].reshape(-1, 1, 1)) + (mat[:,0,2].reshape(-1, 1, 1))) / (Denominator + 1e-8)
-                r[:,y,:,:] = (res[:,x,:,:]*(mat[:,1,0].reshape(-1, 1, 1)) + 
-                    res[:,y,:,:]*(mat[:,1,1].reshape(-1, 1, 1)) +(mat[:,1,2].reshape(-1, 1, 1))) / (Denominator + 1e-8)
+            shape = torch.tensor([Pmap.shape[3], Pmap.shape[2]]).to(self.dev) * self.downsample
+            B = Pmap.shape[0]
+            Hc, Wc = Pmap.shape[2:]
+            res = normPts(res.permute(0, 2, 3, 1).reshape((B, -1, 2)), shape)
+            # r = torch.stack((res[:,1], res[:,0]), dim=1) # (y, x) to (x, y)
+            r = batch_warp_points(res, mat, self.dev)
+            # r = torch.stack((r[:,1], r[:,0]), dim=1)  # (x, y) to (y, x)
+            r = denormPts(r, shape).reshape(B, Hc, Wc, 2).permute(0, 3, 1, 2)
             return r
         else:
             return res
@@ -358,12 +361,7 @@ class UnSuperPoint(nn.Module):
         V_v_2 = torch.sum(torch.pow(V_v, 2), dim=2, keepdim=True)
         denominator = torch.sqrt(torch.matmul(V_v_2, V_v_2.transpose(2,1)))
         one = torch.eye(F).to(self.dev).unsqueeze(0)
-        if torch.isnan(molecular).any() or torch.isnan(denominator).any():
-            print("NAN DETECTED previous!!!")
-            print("B, F : ", B, F)
         rb = torch.sum(torch.square((molecular / (denominator + 1e-8) - one) / (B * F * (F-1))))
-        if torch.isnan(rb).any():
-            print("NAN DETECTED rb!!")
         return rb
 
     def getPtsDescFromHeatmap(self, point, heatmap, desc):

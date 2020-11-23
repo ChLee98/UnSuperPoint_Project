@@ -150,7 +150,7 @@ def evaluate(args, **options):
                 pts = data['warped_prob']
                 img2 = draw_keypoints(img*255, pts.transpose())
 
-                plot_imgs([img1.astype(np.uint8), img2.astype(np.uint8)], titles=['img1', 'img2'], dpi=200)
+                plot_imgs([img1[[2,1,0],:,:].astype(np.uint8), img2[[2,1,0],:,:].astype(np.uint8)], titles=['img1', 'img2'], dpi=200)
                 plt.title("rep: " + str(repeatability[-1]))
                 plt.tight_layout()
                 
